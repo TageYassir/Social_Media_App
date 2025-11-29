@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 /** Data Models Imports */
 import { User } from "../models.js"
 
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -142,3 +143,4 @@ export async function POST(request) {
     return NextResponse.json({ error: error.message || String(error) }, { status: 500, headers: CORS_HEADERS })
   }
 }
+
