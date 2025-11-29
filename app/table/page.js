@@ -28,7 +28,7 @@ import {
  * Notes:
  * - Keeps the original state names: `gender` and `country`.
  * - Expects an API endpoint at /api/users?operation=get-all-users that returns JSON:
- *   { users: [ { _id, id, gender, country, ... }, ... ] }
+ *   { users: [ { _id, id, gender, country, firstName, lastName, email, ... }, ... ] }
  */
 
 export default function Page() {
@@ -135,6 +135,18 @@ export default function Page() {
               {/* ID header */}
               <TableCell>ID</TableCell>
 
+              {/* First name */}
+              <TableCell>First name</TableCell>
+
+              {/* Pseudo */}
+              <TableCell>Pseudo</TableCell>
+
+              {/* Last name */}
+              <TableCell>Last name</TableCell>
+
+              {/* Email */}
+              <TableCell>Email</TableCell>
+
               {/* Gender filter select in header */}
               <TableCell align="right" sx={{ width: 220 }}>
                 <TextField value={gender} onChange={handleGenderChange} select variant="outlined" size="small" fullWidth>
@@ -158,31 +170,39 @@ export default function Page() {
                   ))}
                 </TextField>
               </TableCell>
+
+              {/* Actions */}
+              <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
 
           <TableBody>
             {loading && users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3} align="center" sx={{ py: 6 }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
                   <CircularProgress />
                 </TableCell>
               </TableRow>
             ) : error ? (
               <TableRow>
-                <TableCell colSpan={3} align="center" sx={{ py: 6 }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
                   <Typography color="error">{error}</Typography>
                 </TableCell>
               </TableRow>
             ) : filteredUsers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3} align="center" sx={{ py: 6 }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
                   <Typography color="text.secondary">No rows match the current filters.</Typography>
                 </TableCell>
               </TableRow>
             ) : (
               filteredUsers.map(function (item) {
                 const displayId = item._id || item.id || "—"
+                const firstName = item.firstName || item.name || item.first || "—"
+                const pseudo = item.pseudo || item.username || item.handle || "—"
+                const lastName = item.lastName || item.familyName || item.surname || "—"
+                const email = item.email || "—"
+
                 return (
                   <TableRow key={displayId} hover>
                     <TableCell align="left">
@@ -190,8 +210,35 @@ export default function Page() {
                         {displayId}
                       </Typography>
                     </TableCell>
+
+                    <TableCell>{firstName}</TableCell>
+
+                    <TableCell>{pseudo}</TableCell>
+
+                    <TableCell>{lastName}</TableCell>
+
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {email}
+                      </Typography>
+                    </TableCell>
+
                     <TableCell align="right">{item.gender || "—"}</TableCell>
+
                     <TableCell align="right">{item.country || "—"}</TableCell>
+
+                    <TableCell align="right">
+                      <Button
+                        variant="contained"
+                        size="small"
+                        onClick={() => {
+                          const id = encodeURIComponent(displayId)
+                          window.location.href = `/admin/${id}`
+                        }}
+                      >
+                        Manage
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 )
               })
