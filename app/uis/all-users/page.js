@@ -77,7 +77,7 @@ export default function AllUsersPage() {
       <Box component="form" onSubmit={handleSubmit} sx={{ mb: 2 }}>
         <TextField
           fullWidth
-          placeholder="Search by name, pseudo or email..."
+          placeholder="Search by name or pseudo..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           variant="outlined"
@@ -118,11 +118,13 @@ export default function AllUsersPage() {
           <List>
             {users.map((u) => {
               const id = u._id || u.id || null
-              const initial = (u.pseudo || u.email || "?").charAt(0).toUpperCase()
+              // compute a display name without using email
+              const displayName = u.pseudo || [u.firstName, u.lastName].filter(Boolean).join(" ") || "Unknown"
+              const initial = (displayName.charAt(0) || "?").toUpperCase()
               const bg = (u.gender === "Male" ? colors.blue[800] : colors.red[600])
+              // only show non-email info
               const subtitleParts = []
               if (u.country) subtitleParts.push(u.country)
-              if (u.email) subtitleParts.push(u.email)
               const subtitle = subtitleParts.join(" • ")
 
               const handleOpenConversation = () => navigateToChatWith(id)
@@ -130,7 +132,7 @@ export default function AllUsersPage() {
 
               return (
                 <Paper
-                  key={id || `${u.email}-${Math.random()}`}
+                  key={id || `${u.pseudo || u.firstName || 'user'}-${Math.random()}`}
                   sx={{ mb: 1, cursor: id ? "pointer" : "default" }}
                   role="button"
                   tabIndex={id ? 0 : -1}
@@ -154,7 +156,7 @@ export default function AllUsersPage() {
                       primary={
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                           <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                            {u.pseudo || u.firstName || u.email}
+                            {displayName}
                           </Typography>
                         </Box>
                       }
