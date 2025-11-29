@@ -2,11 +2,12 @@
 
 import React, { useEffect, useState, useRef } from "react"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { useSearchParams, useParams } from "next/navigation"
 import { Box, Typography, Container, TextField, Button, List, ListItem } from "@mui/material"
 
 /**
- * ChatClient updated to accept receiverId via:
+ * ChatClient updated to accept:
+ *  - receiver (object) provided by the server page (preferred)
  *  - receiverId prop (if provided by a dynamic page)
  *  - OR `?receiver=<id>` search param (so All Users can navigate to /uis/chat?receiver=<id>)
  *
@@ -15,13 +16,20 @@ import { Box, Typography, Container, TextField, Button, List, ListItem } from "@
  * It also keeps the existing logic for loading/sending messages.
  */
 
-export default function ChatClient({ receiverId: receiverProp = null }) {
+export default function ChatClient({ receiver: receiverFromServer = null, receiverId: receiverProp = null }) {
   const searchParams = useSearchParams()
   const receiverFromQuery = searchParams ? searchParams.get("receiver") : null
-  const receiverId = receiverProp || receiverFromQuery || null
+
+  // Try to read the dynamic route param as a fallback (page path /uis/chat/[id])
+  const params = useParams ? useParams() : {}
+  const routeId = params?.id ?? null
+
+  // Determine receiverId: prefer server-provided receiver, else prop, query, or route param
+  const receiverId = receiverFromServer ? (receiverFromServer._id || receiverFromServer.id || null) : (receiverProp || receiverFromQuery || routeId || null)
 
   const [currentUserId, setCurrentUserId] = useState(null)
-  const [receiver, setReceiver] = useState(null)
+  const [currentUser, setCurrentUser] = useState(null)
+  const [receiver, setReceiver] = useState(receiverFromServer || null)
   const [messages, setMessages] = useState([])
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
@@ -38,54 +46,92 @@ export default function ChatClient({ receiverId: receiverProp = null }) {
           if (raw) {
             try {
               const parsed = JSON.parse(raw)
-              if (parsed?.id) { setCurrentUserId(parsed.id); return }
+              if (parsed?.id) { setCurrentUserId(parsed.id); setCurrentUser(parsed || null); return }
             } catch (e) { /* ignore parse error */ }
           }
           setCurrentUserId(null)
+          setCurrentUser(null)
           return
         }
         const payload = await res.json()
         const uid = payload?.user?._id || payload?.user?.id || payload?.current?.id || payload?.id || null
-        if (uid) setCurrentUserId(uid)
-        else {
-          const raw = typeof window !== 'undefined' ? localStorage.getItem("user") : null
-          if (raw) {
-            try {
-              const parsed = JSON.parse(raw)
-              if (parsed?.id) setCurrentUserId(parsed.id)
-              else setCurrentUserId(null)
-            } catch (e) { setCurrentUserId(null) }
-          } else {
-            setCurrentUserId(null)
+        if (uid) {
+          setCurrentUserId(uid)
+          // try to fetch the full current user record so we can show pseudo
+          try {
+            const r2 = await fetch(`/api/users/${encodeURIComponent(uid)}`)
+            if (r2.ok) {
+              const p2 = await r2.json()
+              const usr = p2?.user ?? p2
+              setCurrentUser(usr || null)
+            } else {
+              // as fallback, try to use payload.user if present
+              setCurrentUser(payload?.user || null)
+            }
+          } catch (e) {
+            setCurrentUser(payload?.user || null)
           }
+          return
+        } else {
+          setCurrentUser(null)
+           const raw = typeof window !== 'undefined' ? localStorage.getItem("user") : null
+           if (raw) {
+             try {
+               const parsed = JSON.parse(raw)
+               if (parsed?.id) setCurrentUserId(parsed.id)
+               else setCurrentUserId(null)
+             } catch (e) { setCurrentUserId(null) }
+           } else {
+             setCurrentUserId(null)
+           }
         }
       } catch (err) {
         const raw = typeof window !== 'undefined' ? localStorage.getItem("user") : null
         if (raw) {
           try {
             const parsed = JSON.parse(raw)
-            if (parsed?.id) setCurrentUserId(parsed.id)
-            else setCurrentUserId(null)
-          } catch (e) { setCurrentUserId(null) }
+            if (parsed?.id) { setCurrentUserId(parsed.id); setCurrentUser(parsed || null) }
+            else { setCurrentUserId(null); setCurrentUser(null) }
+          } catch (e) { setCurrentUserId(null); setCurrentUser(null) }
         } else {
           setCurrentUserId(null)
+          setCurrentUser(null)
         }
       }
     }
 
     async function loadReceiver() {
+      // If server already provided the receiver object, use it.
+      if (receiverFromServer) {
+        setReceiver(receiverFromServer)
+        return
+      }
+
       if (!receiverId) {
         setReceiver(null)
         return
       }
       try {
-        const res = await fetch(`/api/users?operation=get-user&id=${encodeURIComponent(receiverId)}`)
-        if (!res.ok) {
+        // First try RESTful route if available
+        try {
+          const res = await fetch(`/api/users/${encodeURIComponent(receiverId)}`)
+          if (res.ok) {
+            const payload = await res.json()
+            setReceiver(payload?.user || payload || null)
+            return
+          }
+        } catch (e) {
+          // ignore and fall back to query-based endpoint
+        }
+
+        // Fallback to older query-style endpoint used elsewhere in the app
+        const res2 = await fetch(`/api/users?operation=get-user&id=${encodeURIComponent(receiverId)}`)
+        if (!res2.ok) {
           setReceiver(null)
           return
         }
-        const payload = await res.json()
-        setReceiver(payload?.user || null)
+        const payload2 = await res2.json()
+        setReceiver(payload2?.user || payload2 || null)
       } catch (err) {
         setReceiver(null)
       }
@@ -94,7 +140,7 @@ export default function ChatClient({ receiverId: receiverProp = null }) {
     loadCurrentUser()
     loadReceiver()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receiverId])
+  }, [receiverId, receiverFromServer])
 
   // fetch conversation whenever we have both currentUserId and receiverId
   useEffect(() => {
@@ -228,11 +274,14 @@ export default function ChatClient({ receiverId: receiverProp = null }) {
             Conversation with {receiver ? (receiver.pseudo || receiver.firstName || receiver.email) : (receiverId || "—")}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            You: {currentUserId || "—"}
+            You: {currentUser ? (currentUser.pseudo || currentUser.firstName || currentUserId) : (currentUserId || "—")}
           </Typography>
         </Box>
 
-        <Box>
+        <Box sx={{ display: "flex", gap: 1 }}>
+          <Link href="/uis/chat" passHref>
+            <Button size="small" variant="outlined">Back to Chat List</Button>
+          </Link>
           <Link href="/uis/user-space" passHref>
             <Button size="small" variant="contained">Back to User Space</Button>
           </Link>
@@ -251,7 +300,7 @@ export default function ChatClient({ receiverId: receiverProp = null }) {
         ) : (
           <List>
             {messages.map((m, idx) => {
-              const isMine = (m.senderId === currentUserId)
+              const isMine = (String(m.senderId) === String(currentUserId))
               const key = m._id || m.id || `${m.sentAt}-${idx}`
               return (
                 <ListItem key={key} sx={{ display: "block", py: 1 }}>

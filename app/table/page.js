@@ -21,6 +21,10 @@ import {
   TableHead,
   TableRow,
 } from "@mui/material"
+import InputAdornment from "@mui/material/InputAdornment"
+import IconButton from "@mui/material/IconButton"
+import SearchIcon from "@mui/icons-material/Search"
+import ClearIcon from "@mui/icons-material/Clear"
 
 /**
  * Client page that fetches users from your API and re-uses the original filter UI.
@@ -35,6 +39,10 @@ export default function Page() {
   // keep your original state names
   let [gender, setGender] = useState("")
   let [country, setCountry] = useState("")
+
+  // search state
+  const [query, setQuery] = useState("")
+  const [searchBy, setSearchBy] = useState("pseudo") // pseudo | email | lastName | firstName | id
 
   // users coming from API
   const [users, setUsers] = useState([])
@@ -93,16 +101,40 @@ export default function Page() {
     return Array.from(s)
   }, [users])
 
-  // filtering: empty string means show all
+  // filtering: empty string means show all; also apply search filter by selected field
   const filteredUsers = users.filter(function (item) {
     const genderOk = !gender || item.gender === gender
     const countryOk = !country || item.country === country
-    return genderOk && countryOk
+
+    // search matching
+    const q = (query || "").trim().toLowerCase()
+    let searchOk = true
+    if (q) {
+      if (searchBy === "pseudo") {
+        const val = (item.pseudo || item.username || item.handle || "").toString().toLowerCase()
+        searchOk = val.includes(q)
+      } else if (searchBy === "email") {
+        const val = (item.email || "").toString().toLowerCase()
+        searchOk = val.includes(q)
+      } else if (searchBy === "lastName") {
+        const val = (item.lastName || item.familyName || item.surname || "").toString().toLowerCase()
+        searchOk = val.includes(q)
+      } else if (searchBy === "firstName") {
+        const val = (item.firstName || item.name || item.first || "").toString().toLowerCase()
+        searchOk = val.includes(q)
+      } else if (searchBy === "id") {
+        const val = (item._id || item.id || "").toString().toLowerCase()
+        searchOk = val.includes(q)
+      }
+    }
+
+    return genderOk && countryOk && searchOk
   })
 
   const clearFilters = () => {
     setGender("")
     setCountry("")
+    setQuery("")
   }
 
   return (
@@ -123,9 +155,53 @@ export default function Page() {
 
         <Chip label={loading ? "Loading…" : `${filteredUsers.length} / ${users.length}`} color="primary" />
 
+        <Button onClick={() => { window.location.href = '/dash' }} variant="contained" size="small" sx={{ ml: 1 }}>
+          Users Dashboard
+        </Button>
+
         <Button onClick={clearFilters} variant="outlined" size="small" sx={{ ml: 1 }}>
           Reset
         </Button>
+        {/* Search bar + mode selector (inline, small) */}
+        <Box sx={{ minWidth: 320, display: "flex", gap: 1, ml: 1 }}>
+          <TextField
+            size="small"
+            placeholder="Search..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            fullWidth
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+              endAdornment: (
+                <InputAdornment position="end">
+                  {query ? (
+                    <IconButton size="small" onClick={() => setQuery("")}>
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  ) : null}
+                </InputAdornment>
+              ),
+            }}
+          />
+
+          <TextField
+            select
+            size="small"
+            value={searchBy}
+            onChange={(e) => setSearchBy(e.target.value)}
+            sx={{ width: 160 }}
+          >
+            <MenuItem value="pseudo">Pseudo</MenuItem>
+            <MenuItem value="firstName">First name</MenuItem>
+            <MenuItem value="email">Email</MenuItem>
+            <MenuItem value="lastName">Last name</MenuItem>
+            <MenuItem value="id">ID</MenuItem>
+          </TextField>
+        </Box>
       </Stack>
 
       <TableContainer component={Paper} variant="outlined" sx={{ boxShadow: "none" }}>

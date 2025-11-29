@@ -1,81 +1,161 @@
-"use client"
+'use client'
 
-/** React MUI Imports */
-import { Button, colors, Container, MenuItem, Stack, TextField, Typography, CircularProgress } from "@mui/material"
-/** Next Imports */
-import Image from "next/image"
-/** React Imports */
-import { useState, useEffect, useRef } from "react"
-/** Next Nagivation */
-import { useRouter } from "next/navigation"
+import React, { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import {
+  Box,
+  Button,
+  TextField,
+  Typography,
+  Alert,
+  CircularProgress,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  FormHelperText,
+  Grid,
+  Autocomplete,
+  RadioGroup,
+  FormControlLabel,
+  Radio,
+  FormLabel,
+} from '@mui/material'
 
-export default function Page() {
-  /** Navigation Management */
+/**
+ * Register screen - improved:
+ * - Accept any Gmail address (anything@gmail.com)
+ * - Improved UI for Country (Autocomplete) and Gender (RadioGroup)
+ * - Improved inline validation and helper text
+ *
+ * Note: If you want to also enforce these rules on the server, I can update the API handler.
+ */
+
+const COUNTRIES = [
+  "Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria",
+  "Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan",
+  "Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Côte d'Ivoire","Cabo Verde",
+  "Cambodia","Cameroon","Canada","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo (Congo-Brazzaville)",
+  "Costa Rica","Croatia","Cuba","Cyprus","Czechia (Czech Republic)","Democratic Republic of the Congo","Denmark","Djibouti","Dominica","Dominican Republic",
+  "Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini (fmr. \"Swaziland\")","Ethiopia","Federated States of Micronesia","Fiji",
+  "Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala",
+  "Guinea","Guinea-Bissau","Guyana","Haiti","Holy See","Honduras","Hungary","Iceland","India","Indonesia",
+  "Iran","Iraq","Ireland","Israel","Italy","Jamaica","Japan","Jordan","Kazakhstan","Kenya",
+  "Kiribati","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein",
+  "Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania",
+  "Mauritius","Mexico","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar (formerly Burma)","Namibia",
+  "Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway",
+  "Oman","Pakistan","Palau","Palestine State","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland",
+  "Portugal","Qatar","Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino",
+  "Sao Tome and Principe","Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands",
+  "Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland",
+  "Syria","Tajikistan","Tanzania","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey",
+  "Turkmenistan","Tuvalu","Uganda","Ukraine","United Arab Emirates","United Kingdom","United States of America","Uruguay","Uzbekistan","Vanuatu",
+  "Venezuela","Vietnam","Yemen","Zambia","Zimbabwe"
+]
+
+/** Accept any gmail address (local part non-empty, no spaces) */
+function isAllowedEmail(value) {
+  if (!value) return false
+  return /^[^\s@]+@gmail\.com$/i.test(String(value).trim())
+}
+
+/** Password policy: min 8 chars, at least one upper, one lower, one digit and one special char */
+function isStrongPassword(pwd) {
+  if (!pwd || typeof pwd !== 'string') return false
+  const trimmed = pwd
+  if (trimmed.length < 8) return false
+  const hasUpper = /[A-Z]/.test(trimmed)
+  const hasLower = /[a-z]/.test(trimmed)
+  const hasDigit = /[0-9]/.test(trimmed)
+  const hasSpecial = /[^A-Za-z0-9]/.test(trimmed)
+  return hasUpper && hasLower && hasDigit && hasSpecial
+}
+
+export default function RegisterScreen() {
   const router = useRouter()
-
-  /** States */
-  let [email, setEmail] = useState("")
-  let [password, setPassword] = useState("")
-  let [pseudo, setPseudo] = useState("")
-  let [country, setCountry] = useState("")
-  let [gender, setGender] = useState("")
-  let [firstName, setFirstName] = useState("")
-  let [lastName, setLastName] = useState("")
-  let [error, setError] = useState(null)
-  let [loading, setLoading] = useState(false)
-
-  // Pseudo availability states
-  const [pseudoChecking, setPseudoChecking] = useState(false)
-  const [pseudoAvailable, setPseudoAvailable] = useState(null) // null = unknown, true = available, false = taken
   const debounceRef = useRef(null)
 
+  const [email, setEmail] = useState('')
+  const [emailError, setEmailError] = useState('')
+  const [password, setPassword] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [pseudo, setPseudo] = useState('')
+  const [pseudoAvailable, setPseudoAvailable] = useState(null)
+  const [pseudoChecking, setPseudoChecking] = useState(false)
+  const [country, setCountry] = useState('')
+  const [gender, setGender] = useState('') // '', 'male','female','other'
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
   useEffect(() => {
-    // Cleanup debounce on unmount
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
   }, [])
 
-  /** Handlers */
-  const handleEmailChange = function(event){
-    setEmail(event.target.value)
+  function handleEmailChange(e) {
+    const v = e.target.value || ''
+    setEmail(v)
+    setError(null)
+    if (!v) {
+      setEmailError('Email is required.')
+      return
+    }
+    if (!isAllowedEmail(v)) {
+      setEmailError('Only @gmail.com addresses are allowed (e.g. anything@gmail.com).')
+    } else {
+      setEmailError('')
+    }
   }
 
-  const handlePasswordChange = function(event){
-    setPassword(event.target.value)
+  function handlePasswordChange(e) {
+    const v = e.target.value || ''
+    setPassword(v)
+    setError(null)
+    if (!v) {
+      setPasswordError('Password is required.')
+      return
+    }
+    if (!isStrongPassword(v)) {
+      setPasswordError('Password must be ≥8 chars with upper, lower, digit and special character.')
+    } else {
+      setPasswordError('')
+    }
   }
 
-  const handlePseudoChange = function(event){
-    const value = event.target.value
+  function handlePseudoChange(e) {
+    const value = e.target.value || ''
     setPseudo(value)
     setPseudoAvailable(null)
     setError(null)
-    // schedule availability check
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       checkPseudo(value)
     }, 500)
   }
 
-  const handleCountryChange = function(event){
-    setCountry(event.target.value)
+  function handleCountryChange(event, value) {
+    // Autocomplete returns value (string) or null
+    setCountry(value || '')
   }
 
-  const handleGenderChange = function(event){
+  function handleGenderChange(event) {
     setGender(event.target.value)
   }
 
-  const handleFirstNameChange = function(event){
+  function handleFirstNameChange(event) {
     setFirstName(event.target.value)
   }
 
-  const handleLastNameChange = function(event){
+  function handleLastNameChange(event) {
     setLastName(event.target.value)
   }
 
-  /** Check pseudo availability (uses GET /api/users?operation=check-pseudo&pseudo=...) */
   async function checkPseudo(value) {
-    const v = (value || "").trim()
+    const v = (value || '').trim()
     if (!v) {
       setPseudoAvailable(null)
       setPseudoChecking(false)
@@ -88,166 +168,199 @@ export default function Page() {
 
     try {
       const res = await fetch(`/api/users?operation=check-pseudo&pseudo=${encodeURIComponent(v)}`, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        // credentials: "include", // uncomment if your API needs cookies/session
+        method: 'GET',
+        headers: { Accept: 'application/json' },
       })
       const payload = await res.json().catch(() => ({}))
       if (!res.ok) {
-        // If server error, conservatively mark as not available
         setError(payload?.error || `Server error (${res.status})`)
         setPseudoAvailable(false)
       } else {
         setPseudoAvailable(Boolean(payload?.available))
       }
     } catch (err) {
-      console.error("checkPseudo error", err)
-      setError("Network error while checking pseudo")
+      console.error('checkPseudo error', err)
+      setError('Network error while checking pseudo')
       setPseudoAvailable(false)
     } finally {
       setPseudoChecking(false)
     }
   }
 
-  /** Actions */
-  const create = async function(event){
+  const isFormValid = () => {
+    if (!email || emailError) return false
+    if (!password || passwordError) return false
+    if (!pseudo || pseudo.trim().length < 2) return false
+    if (pseudoAvailable === false) return false
+    return true
+  }
+
+  const create = async function (event) {
     event.preventDefault()
     setError(null)
 
-    if (!email || !password) {
-      setError("Please provide email and password.")
+    // Client-side validation (defensive)
+    if (!isAllowedEmail(email)) {
+      setEmailError('Only @gmail.com addresses are allowed (e.g. anything@gmail.com).')
       return
     }
-
+    if (!isStrongPassword(password)) {
+      setPasswordError('Password must be ≥8 chars with upper, lower, digit and special character.')
+      return
+    }
     if (!pseudo || pseudo.trim().length < 2) {
-      setError("Please provide a pseudo of at least 2 characters.")
+      setError('Please provide a pseudo of at least 2 characters.')
       return
     }
 
-    // If we already know pseudo is taken, short-circuit
     if (pseudoAvailable === false) {
-      setError("This pseudo is already taken. Please choose another.")
+      setError('This pseudo is already taken. Please choose another.')
       return
     }
 
-    // If we haven't checked yet, do a synchronous check before creating
     if (pseudoAvailable === null) {
       setPseudoChecking(true)
       await checkPseudo(pseudo)
       setPseudoChecking(false)
       if (pseudoAvailable === false) {
-        setError("This pseudo is already taken. Please choose another.")
+        setError('This pseudo is already taken. Please choose another.')
         return
       }
     }
 
     setLoading(true)
     try {
-      const response = await fetch("/api/users?operation=create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await fetch('/api/users?operation=create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email, password, pseudo: pseudo.trim(), country, gender, firstName, lastName
-        })
+          email: email.trim(),
+          password,
+          pseudo: pseudo.trim(),
+          country,
+          gender,
+          firstName,
+          lastName,
+        }),
       })
 
       const data = await response.json().catch(() => ({}))
 
       if (response.status === 201) {
-        // Created successfully — redirect to login page
-        router.push("/uis")
+        router.push('/uis')
         return
       }
 
       if (response.status === 409) {
-        // Conflict: could be email or pseudo
-        const msg = data?.error || "An account with this email or pseudo already exists. Please login or choose a different pseudo."
+        const msg = data?.error || 'An account with this email or pseudo already exists. Please login or choose a different pseudo.'
         setError(msg)
-        // If server reported pseudo conflict specifically, mark unavailable
-        if (/(pseudo|username)/i.test(msg)) {
-          setPseudoAvailable(false)
-        }
+        setLoading(false)
         return
       }
 
-      // other errors
-      setError(data?.error || "Registration failed. Please try again.")
+      setError(data?.error || `Server error (${response.status})`)
     } catch (err) {
-      console.error("Registration error", err)
-      setError("Network error. Please try again.")
+      setError(err?.message || 'Network error')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleCancel = function(event){
-    event.preventDefault()
-    // redirect to login page
-    router.push("/uis")
-  }
+  return (
+    <Box component="form" onSubmit={create} sx={{ maxWidth: 720, mx: 'auto', p: 2 }}>
+      <Typography variant="h5" sx={{ mb: 2 }}>Register</Typography>
 
-  return(
-    <Container maxWidth="sm">
-      <Stack direction={"column"} spacing={3} justifyContent={"space-around"} alignItems={"center"} >
-        <Stack direction={"column"} spacing={1} alignSelf={"stretch"} >
-          <Typography variant="h5" textAlign={"center"}>
-            Welcome to Chocolat Social
-          </Typography>
-          <Typography variant="body2" textAlign={"center"}>
-            Welcome to Chocolat Social Welcome to Chocolat Social  Welcome to Chocolat Social Welcome to Chocolat Social Welcome to Chocolat Social 
-          </Typography>
-          <Typography variant="button" textAlign={"center"}>
-            Create an Account
-          </Typography>
-        </Stack>
-        <Stack direction={"column"} spacing={1} alignSelf={"stretch"} component="form" onSubmit={create}>
-          <TextField value={email} onChange={handleEmailChange}  variant="outlined" placeholder="Email" name="email" />
-          <TextField value={password} onChange={handlePasswordChange} variant="outlined" placeholder="Password" type="password" name="password" />
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
           <TextField
+            label="Email"
+            type="email"
+            fullWidth
+            value={email}
+            onChange={handleEmailChange}
+            required
+            error={Boolean(emailError)}
+            helperText={emailError || 'Only @gmail.com addresses accepted (e.g. anything@gmail.com).'}
+          />
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <TextField
+            label="Password"
+            type="password"
+            fullWidth
+            value={password}
+            onChange={handlePasswordChange}
+            required
+            error={Boolean(passwordError)}
+            helperText={passwordError || 'At least 8 chars, include upper/lower/digit/special.'}
+          />
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <TextField
+            label="Pseudo"
+            fullWidth
             value={pseudo}
             onChange={handlePseudoChange}
-            variant="outlined"
-            placeholder="Pseudo"
-            name="pseudo"
             required
-            error={pseudoAvailable === false && !pseudoChecking}
-            helperText={
-              pseudoChecking ? (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><CircularProgress size={14} /> Checking availability…</span>
-              ) : pseudoAvailable === true ? (
-                <span style={{ color: "green" }}>Pseudo available</span>
-              ) : pseudoAvailable === false ? (
-                <span style={{ color: "red" }}>Pseudo already taken</span>
-              ) : (
-                "Choose a pseudonym"
-              )
-            }
+            helperText={pseudoChecking ? 'Checking availability...' : (pseudoAvailable === true ? 'Available' : (pseudoAvailable === false ? 'Taken' : ''))}
           />
+        </Grid>
 
-          <TextField value={gender} onChange={handleGenderChange} select variant="outlined" placeholder="Gender" name="gender">
-            <MenuItem key={"Female"} value={"Female"} selected>Female</MenuItem>
-            <MenuItem key={"Male"} value={"Male"}>Male</MenuItem>
-            <MenuItem key={"Unspecified"} value={"Unspecified"}>Unspecified</MenuItem>
-          </TextField>
-          <TextField value={country} onChange={handleCountryChange} select variant="outlined" placeholder="Country" name="country">
-            <MenuItem key={"Morocco"} value={"Morocco"} selected>Morocco</MenuItem>
-            <MenuItem key={"USA"} value={"USA"}>USA</MenuItem>
-            <MenuItem key={"Singapore"} value={"Singapore"}>Singapore</MenuItem>
-          </TextField>
-          <TextField value={firstName} onChange={handleFirstNameChange} variant="outlined" placeholder="First Name" name="firstName" />
-          <TextField value={lastName} onChange={handleLastNameChange} variant="outlined" placeholder="Last Name" name="lastName" />
+        <Grid item xs={12} md={6}>
+          <Autocomplete
+            options={COUNTRIES}
+            value={country || ''}
+            onChange={handleCountryChange}
+            freeSolo={false}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Country"
+                fullWidth
+                helperText="Select your country (optional)"
+              />
+            )}
+          />
+        </Grid>
 
-          {error && <Typography color="error">{error}</Typography>}
+        <Grid item xs={12} md={6}>
+          <FormControl component="fieldset" fullWidth>
+            <FormLabel component="legend">Gender</FormLabel>
+            <RadioGroup
+              row
+              aria-label="gender"
+              name="gender"
+              value={gender}
+              onChange={handleGenderChange}
+            >
+              <FormControlLabel value="" control={<Radio />} label="Not specified" />
+              <FormControlLabel value="male" control={<Radio />} label="Male" />
+              <FormControlLabel value="female" control={<Radio />} label="Female" />
+              <FormControlLabel value="other" control={<Radio />} label="Other" />
+            </RadioGroup>
+            <FormHelperText>Pick a gender (optional)</FormHelperText>
+          </FormControl>
+        </Grid>
 
-          <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
-            <Button type="submit" variant="contained" size="large" disableElevation disabled={loading || pseudoChecking || pseudoAvailable === false}>
-              {loading ? "Creating..." : "Create"}
-            </Button>
-            <Button variant="outlined" size="large" disableElevation onClick={handleCancel}>Cancel</Button>
-          </Stack>
-        </Stack>
-      </Stack>
-    </Container>
-  ) 
+        <Grid item xs={12} md={6}>
+          <TextField label="First name" value={firstName} onChange={handleFirstNameChange} fullWidth />
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <TextField label="Last name" value={lastName} onChange={handleLastNameChange} fullWidth />
+        </Grid>
+
+        <Grid item xs={12} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Button type="submit" variant="contained" disabled={loading || !isFormValid()}>
+            {loading ? <CircularProgress size={18} /> : 'Create account'}
+          </Button>
+          <Button variant="text" onClick={() => router.push('/uis')}>Back to login</Button>
+        </Grid>
+      </Grid>
+    </Box>
+  )
 }

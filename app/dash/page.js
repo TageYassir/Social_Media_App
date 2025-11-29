@@ -1,5 +1,6 @@
 "use client";
 
+import React, { useEffect, useMemo, useState } from "react"
 import { Money } from "@mui/icons-material";
 import {
   Avatar,
@@ -7,90 +8,236 @@ import {
   Grid,
   Paper,
   Stack,
-  Typography
+  Typography,
+  Box,
+  TextField,
+  MenuItem,
+  Button,
+  CircularProgress,
 } from "@mui/material";
 
 import { PieChart } from "@mui/x-charts";
 import { BarChart } from "@mui/x-charts/BarChart";
 
+/* 
+  Enhanced dashboard:
+  - Shows totals: accounts, online, offline, created last 7 days
+  - Interactive chart area: choose chart type (pie/bar) and column to group by
+  - Aggregates users client-side and renders charts
+*/
+
 export default function Page() {
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  // chart controls
+  const [chartType, setChartType] = useState("pie") // pie | bar
+  const [groupBy, setGroupBy] = useState("country") // which user field to group by
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  useEffect(() => {
+    async function loadUsers() {
+      setLoading(true)
+      setError(null)
+      try {
+        const res = await fetch("/api/users?operation=get-all-users")
+        const payload = await res.json().catch(() => null)
+        if (!res.ok) {
+          setError(payload?.error || `Server returned ${res.status}`)
+          setUsers([])
+        } else {
+          setUsers(Array.isArray(payload?.users) ? payload.users : [])
+        }
+      } catch (e) {
+        setError(e?.message || "Failed to load users")
+        setUsers([])
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadUsers()
+  }, [refreshKey])
+
+  // heuristics for online: explicit boolean or lastActive within 5 minutes
+  const onlineCount = useMemo(() => {
+    if (!Array.isArray(users)) return 0
+    const now = Date.now()
+    return users.reduce((acc, u) => {
+      const on = u?.online === true || u?.isOnline === true
+      const last = u?.lastActive || u?.lastSeen || u?.updatedAt || u?.lastLogin
+      const recentlyActive = last ? (now - new Date(last).getTime() < 5 * 60 * 1000) : false
+      return acc + (on || recentlyActive ? 1 : 0)
+    }, 0)
+  }, [users])
+
+  const totalCount = users?.length || 0
+  const offlineCount = Math.max(0, totalCount - onlineCount)
+
+  // created last 7 days
+  const createdLast7Days = useMemo(() => {
+    if (!Array.isArray(users)) return 0
+    const now = Date.now()
+    return users.reduce((acc, u) => {
+      const created = u?.createdAt || u?.created || u?.created_on || u?.created_at
+      if (!created) return acc
+      const diff = now - new Date(created).getTime()
+      return diff <= 7 * 24 * 60 * 60 * 1000 ? acc + 1 : acc
+    }, 0)
+  }, [users])
+
+  // available grouping fields (restricted to only country and gender)
+  const fieldOptions = ["country", "gender"]
+
+  // aggregated data by selected groupBy field (counts)
+  const aggregated = useMemo(() => {
+    const map = new Map()
+    if (!Array.isArray(users)) return []
+    users.forEach((u) => {
+      // only handle country and gender grouping
+      let key = ""
+      if (groupBy === "country") key = u.country || "Unknown"
+      else if (groupBy === "gender") key = u.gender || "Unknown"
+      else key = "Unknown"
+      key = String(key)
+      map.set(key, (map.get(key) || 0) + 1)
+    })
+    const arr = Array.from(map.entries()).map(([key, count]) => ({ key, count }))
+    // sort by count desc
+    arr.sort((a, b) => b.count - a.count)
+    return arr
+  }, [users, groupBy])
+
+  // chart data builders
+  const pieSeries = useMemo(() => {
+    return [
+      {
+        data: aggregated.map((d, idx) => ({ id: idx, value: d.count, label: d.key })),
+      },
+    ]
+  }, [aggregated])
+
+  const barXAxis = useMemo(() => [{ data: aggregated.map((d) => d.key) }], [aggregated])
+  const barSeries = useMemo(() => aggregated.length ? [{ data: aggregated.map((d) => d.count) }] : [{ data: [] }], [aggregated])
+
   return (
-    <Grid container spacing={2} sx={{ height: "100vh", padding: 2 }}>
+    <Grid container spacing={2} sx={{ padding: 2 }}>
+      {/* Stats row */}
+      <Grid item xs={12}>
+        <Stack direction="row" spacing={2} alignItems="center">
+          <Paper sx={{ p: 2, minWidth: 160 }}>
+            <Typography variant="subtitle2" color="text.secondary">Total Accounts</Typography>
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>{totalCount}</Typography>
+          </Paper>
 
-      {/* ---------------- LEFT CARD ---------------- */}
-      <Grid size = {6} item xs={3}>
-        <Paper sx={{ backgroundColor: colors.amber[200], padding: 2 }}>
-          <Stack direction="column" spacing={2}>
+          <Paper sx={{ p: 2, minWidth: 160 }}>
+            <Typography variant="subtitle2" color="text.secondary">Online</Typography>
+            <Typography variant="h5" sx={{ color: colors.green[700], fontWeight: 700 }}>{onlineCount}</Typography>
+          </Paper>
 
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Avatar />
-              <Money />
+          <Paper sx={{ p: 2, minWidth: 160 }}>
+            <Typography variant="subtitle2" color="text.secondary">Offline</Typography>
+            <Typography variant="h5" sx={{ color: colors.grey[700], fontWeight: 700 }}>{offlineCount}</Typography>
+          </Paper>
+
+          <Paper sx={{ p: 2, minWidth: 200 }}>
+            <Typography variant="subtitle2" color="text.secondary">Created (last 7 days)</Typography>
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>{createdLast7Days}</Typography>
+          </Paper>
+
+          <Box sx={{ flex: 1 }} />
+
+          <Button variant="contained" onClick={() => setRefreshKey((k) => k + 1)}>Refresh</Button>
+        </Stack>
+      </Grid>
+
+      {/* Controls + Chart */}
+      <Grid item xs={12} md={4}>
+        <Paper sx={{ p: 2 }}>
+          <Stack spacing={2}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Avatar sx={{ bgcolor: colors.indigo[500] }}><Money /></Avatar>
+              <Box>
+                <Typography variant="subtitle1">Visualize Users</Typography>
+                <Typography variant="caption" color="text.secondary">Choose chart type and grouping column</Typography>
+              </Box>
             </Stack>
 
-            <Stack direction="column">
-              <Typography variant="h6">Turnover</Typography>
-              <Typography>Global Turnover of 2025</Typography>
-            </Stack>
+            <TextField select size="small" label="Chart type" value={chartType} onChange={(e) => setChartType(e.target.value)}>
+              <MenuItem value="pie">Pie</MenuItem>
+              <MenuItem value="bar">Bar</MenuItem>
+            </TextField>
 
-            <Typography variant="h4">45366</Typography>
+            <TextField select size="small" label="Group by" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
+              {fieldOptions.map((f) => (
+                <MenuItem key={f} value={f}>{f}</MenuItem>
+              ))}
+            </TextField>
 
+            <Typography variant="body2" color="text.secondary">
+              Showing top {aggregated.length} groups
+            </Typography>
+
+            <Box>
+              <Button variant="outlined" size="small" onClick={() => { setChartType("pie"); setGroupBy("country") }}>
+                Quick: Country (Pie)
+              </Button>
+              <Button sx={{ ml: 1 }} variant="outlined" size="small" onClick={() => { setChartType("bar"); setGroupBy("gender") }}>
+                Quick: Gender (Bar)
+              </Button>
+            </Box>
           </Stack>
         </Paper>
       </Grid>
 
-      {/* ---------------- MIDDLE CARD ---------------- */}
-      <Grid size = {6} item xs={3}>
-        <Paper sx={{ height: 200, backgroundColor: colors.green[200], padding: 2 }}>
-          <Stack
-            direction="row"
-            justifyContent="space-between"
-            alignItems="center"
-            sx={{ height: "100%" }}
-          >
-            <Typography variant="h6">Turnover</Typography>
-            <Typography>Global Turnover of 2025</Typography>
-          </Stack>
+      <Grid item xs={12} md={8}>
+        <Paper sx={{ p: 2, minHeight: 360 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>{chartType === "pie" ? "Distribution (Pie)" : "Distribution (Bar)"}</Typography>
+
+          {loading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: 240 }}>
+              <CircularProgress />
+            </Box>
+          ) : error ? (
+            <Typography color="error">{error}</Typography>
+          ) : aggregated.length === 0 ? (
+            <Typography color="text.secondary">No data to display.</Typography>
+          ) : chartType === "pie" ? (
+            <Box sx={{ display: "flex", justifyContent: "center" }}>
+              <PieChart series={pieSeries} width={360} height={320} />
+            </Box>
+          ) : (
+            <Box>
+              <BarChart xAxis={barXAxis} series={barSeries} height={320} />
+            </Box>
+          )}
         </Paper>
       </Grid>
 
-      {/* ---------------- PIE CHART CARD ---------------- */}
-      <Grid size = {6} item xs={3}>
-        <Paper sx={{ padding: 2 }}>
-          <Typography variant="h6" mb={1}>Statistics (Pie)</Typography>
-
-          <PieChart
-            series={[
-              {
-                data: [
-                  { id: 0, value: 10, label: "Series A" },
-                  { id: 1, value: 15, label: "Series B" },
-                  { id: 2, value: 20, label: "Series C" },
-                ],
-              },
-            ]}
-            width={200}
-            height={200}
-          />
+      {/* Recent users preview */}
+      <Grid item xs={12}>
+        <Paper sx={{ p: 2 }}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>Recent accounts (latest 10)</Typography>
+          <Box>
+            {loading ? (
+              <Typography variant="body2" color="text.secondary">Loading...</Typography>
+            ) : (
+              users.slice().reverse().slice(0, 10).map((u) => (
+                <Stack key={u._id || u.id || JSON.stringify(u).slice(0,8)} direction="row" spacing={2} alignItems="center" sx={{ py: 1, borderBottom: "1px solid", borderColor: "divider" }}>
+                  <Avatar sx={{ bgcolor: colors.blue[500], width: 36, height: 36 }}>{(u.pseudo || u.firstName || "U").charAt(0)}</Avatar>
+                  <Box sx={{ minWidth: 220 }}>
+                    <Typography variant="subtitle2">{u.pseudo || u.firstName || u.email || (u._id || u.id)}</Typography>
+                    <Typography variant="caption" color="text.secondary">{u.country || "—"} — {u.gender || "—"}</Typography>
+                  </Box>
+                  <Box sx={{ ml: "auto" }}>
+                    <Typography variant="caption" color="text.secondary">{u.createdAt ? new Date(u.createdAt).toLocaleString() : ""}</Typography>
+                  </Box>
+                </Stack>
+              ))
+            )}
+          </Box>
         </Paper>
       </Grid>
-
-      {/* ---------------- BAR CHART CARD ---------------- */}
-      <Grid size = {6} item xs={3}>
-        <Paper sx={{ padding: 2 }}>
-          <Typography variant="h6" mb={1}>Statistics (Bar)</Typography>
-
-          <BarChart
-            xAxis={[{ data: ["group A", "group B", "group C"] }]}
-            series={[
-              { data: [4, 3, 5] },
-              { data: [1, 6, 3] },
-              { data: [2, 5, 6] },
-            ]}
-            height={300}
-          />
-        </Paper>
-      </Grid>
-
     </Grid>
   );
 }

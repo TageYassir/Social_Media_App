@@ -1,38 +1,26 @@
 'use client'
 
-import React, { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
-import Link from "next/link"
-import {
-  Box,
-  List,
-  ListItemButton,
-  ListItemAvatar,
-  Avatar,
-  ListItemText,
-  Typography,
-  Paper,
-  Container,
-  CircularProgress,
-  Button
-} from "@mui/material"
-import { colors } from "@mui/material"
+import React, { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Box, Button, CircularProgress, List, ListItem, ListItemText, Typography, Avatar, ListItemAvatar, Divider, Paper, TextField, InputAdornment, IconButton } from '@mui/material'
+import SearchIcon from '@mui/icons-material/Search'
+import ClearIcon from '@mui/icons-material/Clear'
 
 /**
  * ConversationsList
  *
- * - Loads current user id
- * - Fetches messages for user (get-by-user)
- * - Groups into conversations and shows the latest message
- * - Renders clickable list that navigates to /uis/chat/<peerId>
- * - Added Back to User Space button in header
+ * - Loads current user id (server endpoint fallback -> localStorage)
+ * - Loads messages for user and groups them by peer id keeping last message
+ * - Resolves peer user records by id (GET /api/users/:id preferred, fallback to /api/users?operation=get-user&id=...)
+ * - Shows peer pseudo (or firstName / email) in the list instead of raw ids
  */
 
 export default function ConversationsList() {
   const router = useRouter()
+  const [query, setQuery] = useState("")
   const [currentUserId, setCurrentUserId] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [conversations, setConversations] = useState([]) // { peerId, lastText, lastAt, peer }
+  const [conversations, setConversations] = useState([]) // { peerId, lastText, lastAt, lastSentAtRaw, peer }
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -103,13 +91,34 @@ export default function ConversationsList() {
 
         const peers = Array.from(map.values()).sort((a, b) => b.lastAt - a.lastAt)
 
-        // Fetch user info for each peer in parallel
+        // Fetch user info for each peer in parallel.
+        // Prefer RESTful GET /api/users/:id, fallback to /api/users?operation=get-user&id=...
         const details = await Promise.all(peers.map(async (p) => {
           try {
-            const r = await fetch(`/api/users?operation=get-user&id=${encodeURIComponent(p.peerId)}`)
-            if (!r.ok) return { ...p, peer: null }
-            const pl = await r.json()
-            return { ...p, peer: pl?.user || null }
+            // Try RESTful route first
+            try {
+              const r = await fetch(`/api/users/${encodeURIComponent(p.peerId)}`)
+              if (r.ok) {
+                const pl = await r.json().catch(() => null)
+                const user = pl?.user ?? pl ?? null
+                return { ...p, peer: user }
+              }
+            } catch (e) {
+              // ignore and try fallback
+            }
+
+            // Fallback to query-based endpoint
+            try {
+              const r2 = await fetch(`/api/users?operation=get-user&id=${encodeURIComponent(p.peerId)}`)
+              if (r2.ok) {
+                const pl2 = await r2.json().catch(() => null)
+                return { ...p, peer: pl2?.user || pl2 || null }
+              }
+            } catch (e) {
+              // ignore
+            }
+
+            return { ...p, peer: null }
           } catch (e) {
             return { ...p, peer: null }
           }
@@ -128,66 +137,116 @@ export default function ConversationsList() {
 
   const openConversation = (peerId) => {
     if (!peerId) return
+    // Prefer route-based chat page
     router.push(`/uis/chat/${encodeURIComponent(peerId)}`)
   }
 
+  // client-side filtering by peer pseudo / firstName
+  const filteredConversations = conversations.filter((c) => {
+    if (!query.trim()) return true
+    const peer = c.peer
+    const name = peer ? (peer.pseudo || peer.firstName || '') : ''
+    return name.toLowerCase().includes(query.trim().toLowerCase())
+  })
+
   return (
-    <Container maxWidth="md" sx={{ py: 3 }}>
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
-        <Typography variant="h5">Conversations</Typography>
-        <Box>
-          <Link href="/uis/user-space" passHref>
-            <Button variant="contained" size="small">Back to User Space</Button>
-          </Link>
-        </Box>
+    <Box sx={{ p: 2 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5" sx={{ fontWeight: 700 }}>Conversations</Typography>
+        <Button size="small" variant="outlined" onClick={() => router.push('/uis/user-space')}>Back</Button>
       </Box>
 
-      <Paper elevation={2} sx={{ height: "65vh", overflowY: "auto", p: 1 }}>
-        {loading ? (
-          <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
-            <CircularProgress />
-          </Box>
-        ) : error ? (
-          <Box sx={{ p: 2 }}>
-            <Typography color="error">{error}</Typography>
-          </Box>
-        ) : conversations.length === 0 ? (
-          <Box sx={{ p: 2 }}>
-            <Typography>No conversations yet. Start one from the Community tab.</Typography>
-          </Box>
-        ) : (
-          <List>
-            {conversations.map((c) => {
-              const id = c.peerId
-              const user = c.peer
-              const name = user ? (user.pseudo || user.firstName || user.email) : id
-              const initial = (user?.pseudo || user?.email || "?").charAt(0).toUpperCase()
-              const bg = user?.gender === "Male" ? colors.blue[800] : colors.red[600]
-              return (
-                <ListItemButton key={id} onClick={() => openConversation(id)}>
-                  <ListItemAvatar>
-                    <Avatar sx={{ bgcolor: bg }}>{initial}</Avatar>
-                  </ListItemAvatar>
+      {/* Search bar */}
+      <Box sx={{ mb: 2 }}>
+        <TextField
+          fullWidth
+          placeholder="Search conversations by pseudo..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          variant="outlined"
+          size="small"
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon />
+              </InputAdornment>
+            ),
+            endAdornment: (
+              <InputAdornment position="end">
+                {query ? (
+                  <IconButton size="small" onClick={() => setQuery("")}><ClearIcon /></IconButton>
+                ) : null}
+              </InputAdornment>
+            )
+          }}
+        />
+      </Box>
 
-                  <ListItemText
-                    primary={name}
-                    secondary={
-                      <>
-                        <Typography component="span" variant="body2" color="text.primary" sx={{ display: "block" }}>
-                          {c.lastText.length > 120 ? `${c.lastText.slice(0, 120)}…` : c.lastText}
-                        </Typography>
-                        <Typography component="span" variant="caption" color="text.secondary">
-                          {c.lastSentAtRaw ? new Date(c.lastSentAtRaw).toLocaleString() : ""}
-                        </Typography>
-                      </>
-                    }
-                  />
-                </ListItemButton>
-              )
-            })}
-          </List>
-        )}
-      </Paper>
-    </Container>
-  )
-}
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+          <CircularProgress size={28} />
+        </Box>
+      ) : error ? (
+        <Box sx={{ p: 2 }}>
+          <Typography color="error">{error}</Typography>
+        </Box>
+      ) : conversations.length === 0 ? (
+        <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>No conversations yet</Typography>
+          <Typography variant="body2" color="text.secondary">Start a new chat from the All Users screen.</Typography>
+        </Paper>
+      ) : (
+        <List>
+          {filteredConversations.map((c) => {
+             const peer = c.peer
+             const displayName = peer ? (peer.pseudo || peer.firstName || c.peerId) : (c.peerId || "—")
+             const subtitle = c.lastText || ""
+             const timeText = c.lastSentAtRaw ? new Date(c.lastSentAtRaw).toLocaleString() : ""
+             const initial = (peer ? (peer.pseudo || peer.firstName || '') : '').charAt(0).toUpperCase() || '?'
+
+             return (
+               <Box key={c.peerId} sx={{ mb: 1 }}>
+                 <Paper
+                   onClick={() => openConversation(c.peerId)}
+                   elevation={0}
+                   sx={{
+                     display: 'flex',
+                     alignItems: 'center',
+                     gap: 2,
+                     p: 1.25,
+                     cursor: 'pointer',
+                     transition: 'background-color 150ms',
+                     '&:hover': { backgroundColor: 'action.hover' }
+                   }}
+                 >
+                   <ListItemAvatar>
+                     <Avatar sx={{ bgcolor: '#1976d2', width: 44, height: 44, fontWeight: 700 }}>{initial}</Avatar>
+                   </ListItemAvatar>
+
+                   <ListItemText
+                     primary={
+                       <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                         {displayName}
+                       </Typography>
+                     }
+                     secondary={
+                       <Typography variant="body2" color="text.secondary" noWrap>
+                         {subtitle}
+                       </Typography>
+                     }
+                     sx={{ mr: 2 }}
+                   />
+
+                   <Box sx={{ ml: 'auto', textAlign: 'right' }}>
+                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{timeText}</Typography>
+                   </Box>
+                 </Paper>
+                 <Divider />
+               </Box>
+             )
+           })}
+         </List>
+       )}
+     </Box>
+   )
+ }
