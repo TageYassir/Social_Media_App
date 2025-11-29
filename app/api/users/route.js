@@ -21,6 +21,16 @@ export async function GET(request) {
     const operation = request.nextUrl.searchParams.get("operation")
     const q = request.nextUrl.searchParams.get("q") || ""
 
+    // New: check if a pseudo is available
+    if (operation === "check-pseudo") {
+      const pseudo = (request.nextUrl.searchParams.get("pseudo") || "").trim()
+      if (!pseudo) {
+        return NextResponse.json({ error: "Missing pseudo" }, { status: 400, headers: CORS_HEADERS })
+      }
+      const found = await User.findOne({ pseudo }).lean()
+      return NextResponse.json({ available: !Boolean(found) }, { status: 200, headers: CORS_HEADERS })
+    }
+
     if (operation === "get-all-users") {
       // If a query is provided, perform a case-insensitive search on multiple fields.
       if (q && q.trim() !== "") {
@@ -76,15 +86,39 @@ export async function POST(request) {
         )
       }
 
-      const existing = await User.findOne({ email: data.email }).lean()
+      // Normalize email and pseudo for comparison
+      const emailNorm = String(data.email).trim().toLowerCase()
+      const pseudoNorm = data.pseudo ? String(data.pseudo).trim() : ""
+
+      // Check for existing user by email OR pseudo
+      const existing = await User.findOne({ $or: [{ email: emailNorm }, ...(pseudoNorm ? [{ pseudo: pseudoNorm }] : [])] }).lean()
       if (existing) {
+        // Prefer a clear message about which field conflicts
+        if (existing.email && existing.email.toLowerCase() === emailNorm) {
+          return NextResponse.json(
+            { error: "A user with this email already exists." },
+            { status: 409, headers: CORS_HEADERS }
+          )
+        }
+        if (pseudoNorm && existing.pseudo === pseudoNorm) {
+          return NextResponse.json(
+            { error: "Pseudo already taken." },
+            { status: 409, headers: CORS_HEADERS }
+          )
+        }
+        // Generic conflict fallback
         return NextResponse.json(
-          { error: "A user with this email already exists." },
+          { error: "User already exists." },
           { status: 409, headers: CORS_HEADERS }
         )
       }
 
-      const created = await User.create(data)
+      // Create: keep the same behavior as before (note: consider hashing passwords)
+      const toCreate = {
+        ...data,
+        email: emailNorm,
+      }
+      const created = await User.create(toCreate)
       const out = created && created.toObject ? created.toObject() : created
       if (out && out.password) delete out.password
 
@@ -143,4 +177,3 @@ export async function POST(request) {
     return NextResponse.json({ error: error.message || String(error) }, { status: 500, headers: CORS_HEADERS })
   }
 }
-
