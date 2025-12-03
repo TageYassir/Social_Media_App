@@ -221,6 +221,51 @@ export default function ProfilePage() {
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [friendsCount, setFriendsCount] = useState(null)
+
+  // robust friends count helper for current user
+  async function fetchFriendsCountFor(id) {
+    if (!id) return 0
+    const endpoints = [
+      `/api/friends?operation=count&userId=${encodeURIComponent(id)}`,
+      `/api/friends?operation=get-friends&userId=${encodeURIComponent(id)}`,
+      `/api/friends?operation=list&userId=${encodeURIComponent(id)}`,
+      `/api/friends?operation=get&userId=${encodeURIComponent(id)}`,
+      `/api/friends?userId=${encodeURIComponent(id)}`,
+      `/api/users/${encodeURIComponent(id)}/friends`,
+    ]
+    const parseCount = (json) => {
+      if (json == null) return null
+      if (Array.isArray(json)) return json.length
+      const candidates = [
+        json.count,
+        json.total,
+        json.friendsCount,
+        json.totalCount,
+        json.length,
+        json.meta?.total,
+        json.meta?.count,
+        json.data?.length,
+        json.friends?.length,
+        json.items?.length
+      ]
+      for (const c of candidates) {
+        if (typeof c === 'number' && !Number.isNaN(c)) return c
+        if (typeof c === 'string' && !Number.isNaN(Number(c))) return Number(c)
+      }
+      return null
+    }
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url)
+        if (!res.ok) continue
+        const json = await res.json().catch(() => null)
+        const c = parseCount(json)
+        if (c != null) return c
+      } catch (e) { /* try next */ }
+    }
+    return 0
+  }
 
   // Load current user
   useEffect(() => {
@@ -264,6 +309,21 @@ export default function ProfilePage() {
 
     loadUser()
   }, [])
+
+  // Fetch friends count for the current user
+  useEffect(() => {
+    const run = async () => {
+      if (!currentUser?._id && !currentUser?.id) return
+      try {
+        const userId = currentUser.__id || currentUser.id
+        const count = await fetchFriendsCountFor(userId)
+        setFriendsCount(typeof count === 'number' ? count : 0)
+      } catch (e) {
+        setFriendsCount(0)
+      }
+    }
+    run()
+  }, [currentUser])
 
   // Load user's posts
   useEffect(() => {
@@ -387,18 +447,10 @@ export default function ProfilePage() {
           </Box>
           <Box sx={{ textAlign: 'center' }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              0
+              {friendsCount == null ? '—' : friendsCount}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Followers
-            </Typography>
-          </Box>
-          <Box sx={{ textAlign: 'center' }}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              0
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Following
+              Friends
             </Typography>
           </Box>
         </Box>

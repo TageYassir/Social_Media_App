@@ -15,6 +15,7 @@ export default function ProfilePage() {
   const [currentUserId, setCurrentUserId] = useState(null)
   const [relationship, setRelationship] = useState(null)
   const [processing, setProcessing] = useState(false)
+  const [friendsCount, setFriendsCount] = useState(null)
 
   async function resolveCurrentUserId() {
     try {
@@ -46,6 +47,55 @@ export default function ProfilePage() {
     return null
   }
 
+  // Add: robust friends count fetch helper
+  async function fetchFriendsCountFor(id) {
+    if (!id) return 0
+    const endpoints = [
+      `/api/friends?operation=count&userId=${encodeURIComponent(id)}`,
+      `/api/friends?operation=get-friends&userId=${encodeURIComponent(id)}`,
+      `/api/friends?operation=list&userId=${encodeURIComponent(id)}`,
+      `/api/friends?operation=get&userId=${encodeURIComponent(id)}`,
+      `/api/friends?userId=${encodeURIComponent(id)}`,
+      `/api/users/${encodeURIComponent(id)}/friends`,
+    ]
+
+    const parseCount = (json) => {
+      if (json == null) return null
+      if (Array.isArray(json)) return json.length
+      // common fields
+      const candidates = [
+        json.count,
+        json.total,
+        json.friendsCount,
+        json.totalCount,
+        json.length,
+        json.meta?.total,
+        json.meta?.count,
+        json.data?.length,
+        json.friends?.length,
+        json.items?.length
+      ]
+      for (const c of candidates) {
+        if (typeof c === 'number' && !Number.isNaN(c)) return c
+        if (typeof c === 'string' && !Number.isNaN(Number(c))) return Number(c)
+      }
+      return null
+    }
+
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url)
+        if (!res.ok) continue
+        const json = await res.json().catch(() => null)
+        const c = parseCount(json)
+        if (c != null) return c
+      } catch (e) {
+        // ignore and try next
+      }
+    }
+    return 0
+  }
+
   useEffect(() => {
     let mounted = true
 
@@ -64,7 +114,23 @@ export default function ProfilePage() {
           throw new Error(payload?.error || `Server returned ${res.status}`)
         }
         const payload = await res.json().catch(() => null)
-        if (mounted) setUser(payload?.user || payload || null)
+        if (mounted) {
+          const resolvedUser = payload?.user || payload || null
+          setUser(resolvedUser)
+
+          // Fetch friends count for this profile (resilient)
+          try {
+            const resolvedId = resolvedUser?._id || resolvedUser?.id || targetId
+            if (resolvedId) {
+              const count = await fetchFriendsCountFor(resolvedId)
+              if (mounted) setFriendsCount(typeof count === 'number' ? count : 0)
+            } else {
+              if (mounted) setFriendsCount(0)
+            }
+          } catch (e) {
+            if (mounted) setFriendsCount(0)
+          }
+        }
       } catch (err) {
         if (mounted) setError(err.message || 'Failed to load profile')
       } finally {
@@ -202,6 +268,11 @@ export default function ProfilePage() {
         <Box sx={{ flex: 1 }}>
           <Typography variant="h5" sx={{ fontWeight: 700 }}>{displayName}</Typography>
           {user.username && <Typography color="text.secondary">@{user.username}</Typography>}
+
+          {/* Replace followers/following with friends count */}
+          <Typography sx={{ mt: 1 }} color="text.secondary">
+            Friends: {friendsCount == null ? '—' : friendsCount}
+          </Typography>
         </Box>
 
         <Stack direction="row" spacing={1}>

@@ -27,6 +27,80 @@ export default function UisLoginPage() {
   const [error, setError] = useState(null)
   const [info, setInfo] = useState(null)
 
+  // Helper to inform server the user is online. Prefer fetch (so server sees Content-Type),
+  // fall back to sendBeacon only if fetch fails or times out.
+  async function markUserOnline(userId) {
+    if (!userId) return false
+    const url = '/api/users?operation=set-online'
+    const body = JSON.stringify({ id: userId, isOnline: true })
+
+    // Try fetch first with a short timeout
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+    const signal = controller ? controller.signal : undefined
+    const fetchPromise = (async () => {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          signal,
+        })
+        return res.ok
+      } catch (e) {
+        return false
+      }
+    })()
+
+    // If AbortController exists, set a short fetch timeout (e.g. 2s)
+    let fetchResult = false
+    if (controller) {
+      const timeout = setTimeout(() => controller.abort(), 2000)
+      try {
+        fetchResult = await fetchPromise
+      } catch (e) {
+        fetchResult = false
+      } finally {
+        clearTimeout(timeout)
+      }
+    } else {
+      fetchResult = await fetchPromise
+    }
+
+    if (fetchResult) return true
+
+    // If fetch failed or was aborted, fall back to sendBeacon (best-effort)
+    try {
+      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+        const blob = new Blob([body], { type: 'application/json' })
+        return navigator.sendBeacon(url, blob)
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return false
+  }
+
+  // If a user is already stored locally, best-effort mark them online when this page mounts.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('user')
+      if (raw) {
+        const stored = JSON.parse(raw)
+        const uid = stored?.id || stored?._id || stored?.userId
+        if (uid && !stored.isOnline) {
+          // update local copy immediately
+          stored.isOnline = true
+          localStorage.setItem('user', JSON.stringify(stored))
+          // fire-and-forget (no await); use sendBeacon or short fetch
+          markUserOnline(uid)
+        }
+      }
+    } catch (e) {
+      // ignore storage/parsing errors
+    }
+  }, [])
+
   useEffect(() => {
     // Normalize the current history entry to /uis
     try {
@@ -61,10 +135,11 @@ export default function UisLoginPage() {
 
     setLoading(true)
     try {
+      // Include isOnline:true in login payload so server-side handlers can set it immediately
       const res = await fetch('/api/users?operation=login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, isOnline: true }),
       })
 
       const payload = await res.json().catch(() => ({}))
@@ -83,12 +158,22 @@ export default function UisLoginPage() {
         return
       }
 
-      // Save user to localStorage (same fallback chat uses)
+      // Save user to localStorage (same fallback chat uses) and set isOnline locally
       try {
-        const stored = { id: user._id || user.id || user._id || user?.id, ...user }
+        const userId = user._id || user.id || user?.id
+        const stored = { id: userId, ...user, isOnline: true }
         localStorage.setItem('user', JSON.stringify(stored))
       } catch (err) {
         // ignore storage errors
+      }
+
+      // Best-effort: inform server to mark user as online (fire-and-forget).
+      try {
+        const userId = user._id || user.id || user?.id
+        // don't await — allow immediate redirect
+        markUserOnline(userId)
+      } catch (e) {
+        // ignore
       }
 
       // Optionally inform the user

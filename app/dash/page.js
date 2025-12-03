@@ -14,7 +14,16 @@ import {
   MenuItem,
   Button,
   CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  List,
+  ListItem,
+  ListItemAvatar,
+  ListItemText,
+  IconButton,
 } from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
 
 import { PieChart } from "@mui/x-charts";
 import { BarChart } from "@mui/x-charts/BarChart";
@@ -30,6 +39,32 @@ export default function Page() {
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  // Online users dialog state
+  const [openOnlineList, setOpenOnlineList] = useState(false)
+  const handleOpenOnline = () => setOpenOnlineList(true)
+  const handleCloseOnline = () => setOpenOnlineList(false)
+
+  // Helper to inform server the current user is online (best-effort)
+  async function markUserOnline(userId) {
+    if (!userId) return false
+    const url = "/api/users?operation=set-online"
+    const body = JSON.stringify({ id: userId, isOnline: true })
+    try {
+      if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+        const blob = new Blob([body], { type: "application/json" })
+        if (navigator.sendBeacon(url, blob)) return true
+      }
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      })
+      return res.ok
+    } catch (e) {
+      return false
+    }
+  }
 
   // chart controls
   const [chartType, setChartType] = useState("pie") // pie | bar
@@ -47,7 +82,33 @@ export default function Page() {
           setError(payload?.error || `Server returned ${res.status}`)
           setUsers([])
         } else {
-          setUsers(Array.isArray(payload?.users) ? payload.users : [])
+          // Normalize users: add computed isOnlineComputed so UI doesn't flip purely based on server isOnline field.
+          const raw = Array.isArray(payload?.users) ? payload.users : []
+          const now = Date.now()
+          const normalized = raw.map((u) => {
+            const last = u?.lastActive || u?.lastSeen || u?.updatedAt || u?.lastLogin
+            const recentlyActive = last ? (now - new Date(last).getTime() < 5 * 60 * 1000) : false
+            const explicitOn = u?.online === true || u?.isOnline === true
+            const explicitOff = u?.online === false || u?.isOnline === false
+            // If server explicitly marks user offline, respect that. Otherwise use explicit true or recent activity.
+            const isOnlineComputed = explicitOff ? false : (explicitOn || recentlyActive)
+            return { ...u, isOnlineComputed }
+          })
+          setUsers(normalized)
+          // Best-effort: tell server current local user we're online (so server-side flag has better chance to stay true)
+          try {
+            const rawStored = typeof localStorage !== "undefined" ? localStorage.getItem("user") : null
+            if (rawStored) {
+              const stored = JSON.parse(rawStored)
+              const uid = stored?.id || stored?._id || stored?.userId
+              if (uid) {
+                // fire-and-forget
+                markUserOnline(uid)
+              }
+            }
+          } catch (e) {
+            // ignore storage errors
+          }
         }
       } catch (e) {
         setError(e?.message || "Failed to load users")
@@ -62,8 +123,13 @@ export default function Page() {
   // heuristics for online: explicit boolean or lastActive within 5 minutes
   const onlineCount = useMemo(() => {
     if (!Array.isArray(users)) return 0
-    const now = Date.now()
     return users.reduce((acc, u) => {
+      // If normalization produced an explicit computed flag, use it strictly.
+      if (typeof u?.isOnlineComputed !== "undefined") {
+        return acc + (u.isOnlineComputed ? 1 : 0)
+      }
+      // Fallback heuristics if no computed flag present
+      const now = Date.now()
       const on = u?.online === true || u?.isOnline === true
       const last = u?.lastActive || u?.lastSeen || u?.updatedAt || u?.lastLogin
       const recentlyActive = last ? (now - new Date(last).getTime() < 5 * 60 * 1000) : false
@@ -120,6 +186,20 @@ export default function Page() {
   const barXAxis = useMemo(() => [{ data: aggregated.map((d) => d.key) }], [aggregated])
   const barSeries = useMemo(() => aggregated.length ? [{ data: aggregated.map((d) => d.count) }] : [{ data: [] }], [aggregated])
 
+  // derive online users list (respect explicit false from server via isOnlineComputed)
+  const onlineUsers = useMemo(() => {
+    if (!Array.isArray(users)) return []
+    return users.filter((u) => {
+      if (typeof u?.isOnlineComputed !== "undefined") return u.isOnlineComputed === true
+      // fallback: keep previous heuristics
+      const now = Date.now()
+      const on = u?.online === true || u?.isOnline === true
+      const last = u?.lastActive || u?.lastSeen || u?.updatedAt || u?.lastLogin
+      const recentlyActive = last ? now - new Date(last).getTime() < 5 * 60 * 1000 : false
+      return on || recentlyActive
+    })
+  }, [users])
+
   return (
     <Grid container spacing={2} sx={{ padding: 2 }}>
       {/* Stats row */}
@@ -130,7 +210,13 @@ export default function Page() {
             <Typography variant="h5" sx={{ fontWeight: 700 }}>{totalCount}</Typography>
           </Paper>
 
-          <Paper sx={{ p: 2, minWidth: 160 }}>
+          {/* clickable Online card */}
+          <Paper
+            sx={{ p: 2, minWidth: 160, cursor: "pointer", "&:hover": { boxShadow: 3 } }}
+            onClick={handleOpenOnline}
+            role="button"
+            aria-label="Show online users"
+          >
             <Typography variant="subtitle2" color="text.secondary">Online</Typography>
             <Typography variant="h5" sx={{ color: colors.green[700], fontWeight: 700 }}>{onlineCount}</Typography>
           </Paper>
@@ -226,7 +312,12 @@ export default function Page() {
                 <Stack key={u._id || u.id || JSON.stringify(u).slice(0,8)} direction="row" spacing={2} alignItems="center" sx={{ py: 1, borderBottom: "1px solid", borderColor: "divider" }}>
                   <Avatar sx={{ bgcolor: colors.blue[500], width: 36, height: 36 }}>{(u.pseudo || u.firstName || "U").charAt(0)}</Avatar>
                   <Box sx={{ minWidth: 220 }}>
-                    <Typography variant="subtitle2">{u.pseudo || u.firstName || u.email || (u._id || u.id)}</Typography>
+                    <Typography variant="subtitle2">
+                      {u.pseudo || u.firstName || u.email || (u._id || u.id)}
+                      {u?.isOnlineComputed ? (
+                        <Typography component="span" sx={{ ml: 1, color: colors.green[700], fontWeight: 600 }} variant="caption">• online</Typography>
+                      ) : null}
+                    </Typography>
                     <Typography variant="caption" color="text.secondary">{u.country || "—"} — {u.gender || "—"}</Typography>
                   </Box>
                   <Box sx={{ ml: "auto" }}>
@@ -238,6 +329,42 @@ export default function Page() {
           </Box>
         </Paper>
       </Grid>
+
+      {/* Online users dialog */}
+      <Dialog open={openOnlineList} onClose={handleCloseOnline} fullWidth maxWidth="sm">
+        <DialogTitle>
+          Online users ({onlineUsers.length})
+          <IconButton
+            aria-label="close"
+            onClick={handleCloseOnline}
+            sx={{ position: "absolute", right: 8, top: 8 }}
+            size="large"
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {onlineUsers.length === 0 ? (
+            <Typography color="text.secondary">No users online</Typography>
+          ) : (
+            <List>
+              {onlineUsers.map((u) => (
+                <ListItem key={u._id || u.id || JSON.stringify(u).slice(0,8)}>
+                  <ListItemAvatar>
+                    <Avatar sx={{ bgcolor: colors.blue[500], width: 36, height: 36 }}>
+                      {(u.pseudo || u.firstName || "U").charAt(0)}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={u.pseudo || u.firstName || u.email || (u._id || u.id)}
+                    secondary={u.country ? `${u.country} — ${u.gender || "—"}` : (u.gender || "—")}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </DialogContent>
+      </Dialog>
     </Grid>
   );
 }
