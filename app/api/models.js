@@ -91,11 +91,47 @@ const friendSchema = new mongoose.Schema({
   status: { type: String, enum: ["pending", "accepted", "refused"], default: "pending" },
 }, { timestamps: true });
 
-// Avoid model overwrite in dev / hot-reload environments
+/**
+ * Crypto wallet schema
+ * - idCrypto: String (unique identifier string for public sharing)
+ * - userId: ObjectId (ref User) - owner of the wallet
+ * - balance: Number
+ */
+const cryptoSchema = new mongoose.Schema({
+  idCrypto: { type: String, required: true, unique: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, unique: true },
+  balance: { type: Number, default: 0 },
+}, { timestamps: true });
+
+/**
+ * Crypto transaction schema
+ * - senderCryptoId: String (idCrypto)
+ * - receiverCryptoId: String (idCrypto)
+ * - senderUserId: ObjectId (ref User)
+ * - receiverUserId: ObjectId (ref User)
+ * - amount: Number
+ * - createdAt: Date
+ */
+const cryptoTransactionSchema = new mongoose.Schema({
+  senderCryptoId: { type: String, default: null },
+  receiverCryptoId: { type: String, required: true },
+  senderUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  receiverUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  amount: { type: Number, required: true },
+  createdAt: { type: Date, default: Date.now },
+}, { timestamps: true });
+
+/**
+ * Avoid model overwrite in dev / hot-reload environments
+ */
 const User = mongoose.models.User || mongoose.model("User", userSchema);
 const Post = mongoose.models.Post || mongoose.model("Post", postSchema);
 const Message = mongoose.models.Message || mongoose.model("Message", messageSchema);
 const Friend = mongoose.models.Friend || mongoose.model("Friend", friendSchema);
+
+// new models
+const Crypto = mongoose.models.Crypto || mongoose.model("Crypto", cryptoSchema);
+const CryptoTransaction = mongoose.models.CryptoTransaction || mongoose.model("CryptoTransaction", cryptoTransactionSchema);
 
 /**
  * Ensure connection is established when this module is imported.
@@ -104,4 +140,4 @@ connectToDatabase().catch((err) => {
   console.error("Failed to connect to MongoDB", err);
 });
 
-export { User, Post, Message, Friend, connectToDatabase };
+export { User, Post, Message, Friend, Crypto, CryptoTransaction, connectToDatabase };
