@@ -15,7 +15,11 @@ export default function RootLayout({ children }) {
   const [currentUserId, setCurrentUserId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [processingId, setProcessingId] = useState(null)
+  const [value, setValue] = useState(0);
 
+  // ---------------------------------------------------------------------------
+  // Helpers: resolve current user id from server/local state
+  // ---------------------------------------------------------------------------
   const resolveCurrentUserId = async () => {
     try {
       const res = await fetch('/api/auth/me')
@@ -41,11 +45,16 @@ export default function RootLayout({ children }) {
           const lid = parsed?.id || parsed?._id || null
           if (lid) return lid
         }
+        const uid = localStorage.getItem('userId')
+        if (uid) return uid
       }
     } catch (e) {}
     return null
   }
 
+  // ---------------------------------------------------------------------------
+  // Invitations
+  // ---------------------------------------------------------------------------
   const fetchInvitations = useCallback(async (uid) => {
     if (!uid) return setInvitations([])
     try {
@@ -113,13 +122,73 @@ export default function RootLayout({ children }) {
     }
   }
 
+  // navigation helper
   function loadScreen(event, screenURL) {
     event?.preventDefault?.();
     router.push(screenURL);
   }
 
-  const [value, setValue] = useState(0);
+  // ---------------------------------------------------------------------------
+  // Wallet disconnect helper (attempts to disconnect common providers + clear cache)
+  // ---------------------------------------------------------------------------
+  const signOutWallet = async () => {
+    try {
+      if (typeof window === 'undefined') return;
+      const eth = window.ethereum;
+      try { if (eth && typeof eth.disconnect === 'function') await eth.disconnect().catch(() => {}); } catch (e) {}
+      try { if (eth && typeof eth.close === 'function') await eth.close().catch(() => {}); } catch (e) {}
+      try { if (eth?.connector?.disconnect) await eth.connector.disconnect().catch(() => {}); } catch (e) {}
+      try { if (eth?.connector?.close) await eth.connector.close().catch(() => {}); } catch (e) {}
+      try { if (eth?.wc?.disconnect) await eth.wc.disconnect().catch(() => {}); } catch (e) {}
+    } catch (e) {
+      // ignore provider disconnect errors
+    }
 
+    // remove common cached keys used by WalletConnect / connectors / libs
+    try {
+      const cachedKeys = [
+        'walletconnect',
+        'WALLETCONNECT_DEEPLINK_CHOICE',
+        'WALLET_CONNECT_CACHED_PROVIDER',
+        'connectedWallet',
+        'connectorId',
+        'wagmi.wallet',
+        'web3auth',
+        'connectedWalletAddress'
+      ];
+      cachedKeys.forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+    } catch (e) {}
+
+    try { window.dispatchEvent(new CustomEvent('wallet-disconnected')); } catch (e) {}
+  }
+
+  // ---------------------------------------------------------------------------
+  // local cleanup: remove wallet and tx keys from localStorage (all or for specific user)
+  // ---------------------------------------------------------------------------
+  function clearWalletLocalKeysForUser(optionalUserId) {
+    try {
+      if (typeof window === 'undefined') return;
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (optionalUserId) {
+          if (key.startsWith(`wallet:${optionalUserId}:`) || key.startsWith(`tx:${optionalUserId}`) || key.startsWith(`tx:`)) {
+            localStorage.removeItem(key);
+          }
+        } else {
+          if (key.startsWith('wallet:') || key.startsWith('tx:')) {
+            localStorage.removeItem(key);
+          }
+        }
+      }
+    } catch (e) {
+      // ignore storage errors
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Logout handler — improved to clear client-side wallet artifacts and broadcast logout
+  // ---------------------------------------------------------------------------
   async function handleLogout() {
     // discover current user id (same fallback as earlier)
     let userId = null
@@ -127,12 +196,17 @@ export default function RootLayout({ children }) {
       const raw = typeof window !== 'undefined' ? localStorage.getItem('user') : null
       if (raw) {
         const parsed = JSON.parse(raw)
-        userId = parsed?.id ?? null
+        userId = parsed?.id ?? parsed?._id ?? null
+      }
+      if (!userId) {
+        const uid = typeof window !== 'undefined' ? localStorage.getItem('userId') : null
+        if (uid) userId = uid
       }
     } catch (e) {
       userId = null
     }
 
+    // attempt server logout (best-effort)
     try {
       if (userId) {
         await fetch('/api/users?operation=logout', {
@@ -147,19 +221,80 @@ export default function RootLayout({ children }) {
       // ignore
     }
 
+    // disconnect wallet providers and clear related cached keys
     try {
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('user')
-        localStorage.removeItem('userId')
-        sessionStorage.setItem('justLoggedOut', '1')
-      }
+      await signOutWallet()
     } catch (e) {}
 
-    if (typeof window !== 'undefined') {
+    // Clear local app state and wallet artifacts
+    try {
+      localStorage.removeItem('user')
+    } catch (e) {}
+    try {
+      localStorage.removeItem('userId')
+    } catch (e) {}
+    try {
+      sessionStorage.setItem('justLoggedOut', '1')
+    } catch (e) {}
+
+    // Clear wallet and tx keys (prefer per-user, if available)
+    try {
+      if (userId) clearWalletLocalKeysForUser(userId)
+      else clearWalletLocalKeysForUser()
+    } catch (e) {}
+
+    // Broadcast logout so other tabs / components can react
+    try {
+      localStorage.setItem('user-logout-ts', String(Date.now()));
+      // also dispatch a custom event for in-tab listeners
+      try { window.dispatchEvent(new CustomEvent('user-logout', { detail: { userId } })) } catch (e) {}
+    } catch (e) {}
+
+    // Redirect to public area
+    try {
       window.location.replace('/uis')
+    } catch (e) {
+      try { router.replace('/uis') } catch (er) {}
     }
   }
 
+  // Expose sign-out helper and listen for external logout broadcasts
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try { window.appSignOut = handleLogout } catch (e) {}
+
+    function onStorage(e) {
+      try {
+        if (!e) return;
+        // When another tab signals logout, clear local wallet and user keys locally
+        if (e.key === 'user-logout-ts') {
+          try { localStorage.removeItem('user'); } catch (er) {}
+          try { localStorage.removeItem('userId'); } catch (er) {}
+          clearWalletLocalKeysForUser();
+          // optional: navigate to public area if you prefer immediate redirect
+          // router.replace('/uis')
+        }
+        // If userId was removed in another tab, clear wallet keys
+        if (e.key === 'userId' && (e.newValue === null || e.newValue === '')) {
+          clearWalletLocalKeysForUser();
+        }
+      } catch (err) {
+        // ignore
+      }
+    }
+
+    window.addEventListener('storage', onStorage)
+    return () => {
+      try { delete window.appSignOut } catch (e) {}
+      window.removeEventListener('storage', onStorage)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ---------------------------------------------------------------------------
+  // UI
+  // ---------------------------------------------------------------------------
   return (
     <Box sx={{ position: "absolute", top: 0, left: 0, bottom: 0, right: 0 }}>
       <Box sx={{ position: "relative", top: 0, left: 0, bottom: 0, right: 0, display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', overflow: 'hidden' }}>

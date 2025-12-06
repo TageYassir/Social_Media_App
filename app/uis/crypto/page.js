@@ -1,6 +1,6 @@
-"use client";
+'use client'
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Line } from "react-chartjs-2";
 import {
@@ -35,6 +35,168 @@ export default function CryptoIndex() {
 
   const currencies = ["BTC", "ETH", "LTC"];
   const [selectedCurrency, setSelectedCurrency] = useState("BTC");
+
+  // connected user id state (updated from cookie, window globals, localStorage, or server endpoints)
+  const [connectedUserId, setConnectedUserId] = useState(null);
+  const mountedRef = useRef(false);
+  const router = useRouter();
+
+  // detection helpers
+  const hasWindow = typeof window !== "undefined";
+  const hasDocument = typeof document !== "undefined";
+
+  function getUserIdFromCookie() {
+    if (!hasDocument) return null;
+    try {
+      const m = document.cookie.match(/(?:^|;\s*)userId=([^;]+)/);
+      return m ? decodeURIComponent(m[1]) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function getUserIdFromWindow() {
+    if (!hasWindow) return null;
+    try {
+      if (window.__USER_ID__) return window.__USER_ID__;
+      if (window.__NEXT_DATA__) {
+        const nd = window.__NEXT_DATA__;
+        const maybe = nd.props?.pageProps?.user?.id || nd.props?.pageProps?.userId || nd.props?.pageProps?.user?._id;
+        if (maybe) return maybe;
+      }
+      // some apps store a user object on window.app.currentUser
+      if (window.app && window.app.currentUser) {
+        return window.app.currentUser.id || window.app.currentUser.userId || window.app.currentUser._id || null;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return null;
+  }
+
+  function getUserIdFromStorage() {
+    if (!hasWindow) return null;
+    try {
+      // check explicit keys first
+      const keys = ["connectedUserId", "userId", "currentUserId"];
+      for (const k of keys) {
+        try {
+          const raw = localStorage.getItem(k) || sessionStorage.getItem(k);
+          if (raw) return raw;
+        } catch (e) {}
+      }
+      // check 'user' object stored as JSON
+      try {
+        const rawUser = localStorage.getItem("user") || sessionStorage.getItem("user");
+        if (rawUser) {
+          const parsed = JSON.parse(rawUser);
+          return parsed?.id || parsed?._id || parsed?.userId || null;
+        }
+      } catch (e) {}
+      // scan for other likely keys (defensive)
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (/user/i.test(key) || /auth/i.test(key)) {
+          try {
+            const raw = localStorage.getItem(key);
+            if (!raw) continue;
+            if (raw.trim().startsWith("{")) {
+              const parsed = JSON.parse(raw);
+              const maybe = parsed?.id || parsed?._id || parsed?.userId;
+              if (maybe) return maybe;
+            } else if (raw.length > 5) {
+              // some sites store a plain id
+              return raw;
+            }
+          } catch (e) {}
+        }
+      }
+    } catch (e) {
+      // storage not available
+    }
+    return null;
+  }
+
+  async function fetchUserFromRoute() {
+    if (!hasWindow) return null;
+    const tries = ["/api/auth/me", "/api/users?operation=get-current", "/api/users?operation=get-current-user", "/api/user", "/api/me"];
+    for (const p of tries) {
+      try {
+        const res = await fetch(p, { credentials: "same-origin" });
+        if (!res.ok) continue;
+        const json = await res.json().catch(() => null);
+        const maybe = json?.user?._id || json?.user?.id || json?.id || json?.userId || null;
+        if (maybe) return maybe;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  // central detection function
+  async function detectConnectedUserId() {
+    // 1) cookie
+    const cookie = getUserIdFromCookie();
+    if (cookie) return String(cookie);
+
+    // 2) window globals
+    const w = getUserIdFromWindow();
+    if (w) return String(w);
+
+    // 3) localStorage/sessionStorage
+    const s = getUserIdFromStorage();
+    if (s) return String(s);
+
+    // 4) server endpoints (best-effort)
+    try {
+      const fromApi = await fetchUserFromRoute();
+      if (fromApi) return String(fromApi);
+    } catch (e) {}
+
+    return null;
+  }
+
+  // initial detection + subscribe to storage changes to remain in sync with login/logout flows
+  useEffect(() => {
+    mountedRef.current = true;
+    let canceled = false;
+
+    (async () => {
+      const id = await detectConnectedUserId();
+      if (canceled) return;
+      if (id) setConnectedUserId(String(id));
+      else setConnectedUserId(null);
+    })();
+
+    function onStorage(e) {
+      try {
+        if (!e) return;
+        // if user markers changed, re-run detection
+        if (e.key === "connectedUserId" || e.key === "userId" || e.key === "user" || e.key?.startsWith("auth") || e.key === "user-logout-ts") {
+          // small debounce to allow the login/logout flow to fully commit multiple keys
+          setTimeout(async () => {
+            if (!mountedRef.current) return;
+            const id = await detectConnectedUserId();
+            if (id) setConnectedUserId(String(id));
+            else setConnectedUserId(null);
+          }, 120);
+        }
+      } catch (err) {}
+    }
+
+    try {
+      window.addEventListener("storage", onStorage);
+    } catch (e) {}
+
+    return () => {
+      canceled = true;
+      mountedRef.current = false;
+      try {
+        window.removeEventListener("storage", onStorage);
+      } catch (e) {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // generate simple mock price history per currency (client-only)
   function generateSeries(currency, points = 30) {
@@ -95,8 +257,6 @@ export default function CryptoIndex() {
     },
   };
 
-  const router = useRouter();
-
   return (
     <section style={{ padding: 24, fontFamily: "Arial, sans-serif", maxWidth: 900 }}>
       <h1 style={{ margin: 0 }}>Crypto Dashboard</h1>
@@ -131,20 +291,29 @@ export default function CryptoIndex() {
         <Line data={data} options={options} />
       </div>
 
-      {/* NEW: single big action button (not related to individual transactions) */}
+      {/* NEW: single big action button (navigates to dynamic user page using connectedUserId) */}
       <div style={{ marginTop: 16, display: "flex", justifyContent: "center" }}>
         <button
-          onClick={() => router.push("/uis/crypto/new")}
+          onClick={() => {
+            if (connectedUserId) {
+              router.push(`/uis/crypto/${encodeURIComponent(String(connectedUserId))}`);
+            } else {
+              // no connected user detected — navigate to generic /new where the crypto page will attempt to detect and redirect
+              router.push(`/uis/crypto/new`);
+            }
+          }}
           style={{
             padding: "12px 20px",
-            background: "#0b74de",
+            background: connectedUserId ? "#0b74de" : "#999",
             color: "#fff",
             border: "none",
             borderRadius: 8,
             cursor: "pointer",
             fontSize: 16,
             fontWeight: 600,
+            opacity: connectedUserId ? 1 : 0.95
           }}
+          title={connectedUserId ? `Open wallet for ${connectedUserId}` : "No connected user detected"}
         >
           Make Transaction
         </button>
