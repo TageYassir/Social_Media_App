@@ -272,12 +272,43 @@ export default function RootLayout({ children }) {
           try { localStorage.removeItem('user'); } catch (er) {}
           try { localStorage.removeItem('userId'); } catch (er) {}
           clearWalletLocalKeysForUser();
-          // optional: navigate to public area if you prefer immediate redirect
-          // router.replace('/uis')
+          setCurrentUserId(null);
         }
+
         // If userId was removed in another tab, clear wallet keys
-        if (e.key === 'userId' && (e.newValue === null || e.newValue === '')) {
-          clearWalletLocalKeysForUser();
+        if (e.key === 'userId') {
+          const oldVal = e.oldValue;
+          const newVal = e.newValue;
+          if (!newVal) {
+            // user cleared -> remove all wallet keys and reset currentUserId
+            clearWalletLocalKeysForUser();
+            setCurrentUserId(null);
+          } else if (oldVal && oldVal !== newVal) {
+            // user switched accounts in another tab: remove previous user's wallet keys and update currentUserId
+            try { clearWalletLocalKeysForUser(oldVal); } catch (er) {}
+            setCurrentUserId(newVal);
+            fetchInvitations(newVal);
+          } else if (!oldVal && newVal) {
+            // fresh login in another tab
+            setCurrentUserId(newVal);
+            fetchInvitations(newVal);
+          }
+        }
+
+        // If full user object changed (e.g. login), attempt to read and update currentUserId
+        if (e.key === 'user') {
+          try {
+            const parsed = e.newValue ? JSON.parse(e.newValue) : null;
+            const newId = parsed?.id || parsed?._id || null;
+            if (newId) {
+              setCurrentUserId(newId);
+              fetchInvitations(newId);
+            }
+            if (!e.newValue) {
+              // removed user
+              setCurrentUserId(null);
+            }
+          } catch (err) {}
         }
       } catch (err) {
         // ignore
@@ -290,7 +321,7 @@ export default function RootLayout({ children }) {
       window.removeEventListener('storage', onStorage)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [fetchInvitations])
 
   // ---------------------------------------------------------------------------
   // UI

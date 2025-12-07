@@ -92,33 +92,33 @@ const friendSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 /**
- * Crypto wallet schema
- * - idCrypto: String (unique identifier string for public sharing)
- * - userId: ObjectId (ref User) - owner of the wallet
+ * Wallet schema - stores a walletId related to a user and its balance
+ * Fields:
+ * - walletId: String (unique wallet identifier)
+ * - userId: ObjectId (ref User)
  * - balance: Number
  */
-const cryptoSchema = new mongoose.Schema({
-  idCrypto: { type: String, required: true, unique: true },
+const walletSchema = new mongoose.Schema({
+  walletId: { type: String, required: true, unique: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, unique: true },
-  balance: { type: Number, default: 0 },
+  balance: { type: Number, required: true, default: 0 },
 }, { timestamps: true });
 
 /**
- * Crypto transaction schema
- * - senderCryptoId: String (idCrypto)
- * - receiverCryptoId: String (idCrypto)
- * - senderUserId: ObjectId (ref User)
- * - receiverUserId: ObjectId (ref User)
+ * Transaction schema - records transfers between wallets
+ * Fields:
+ * - senderWalletId: String (walletId of sender)
+ * - receiverWalletId: String (walletId of receiver)
  * - amount: Number
- * - createdAt: Date
+ * - status: String (optional - pending/completed/failed)
+ * - sentAt: Date
  */
-const cryptoTransactionSchema = new mongoose.Schema({
-  senderCryptoId: { type: String, default: null },
-  receiverCryptoId: { type: String, required: true },
-  senderUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
-  receiverUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+const transactionSchema = new mongoose.Schema({
+  senderWalletId: { type: String, required: true },
+  receiverWalletId: { type: String, required: true },
   amount: { type: Number, required: true },
-  createdAt: { type: Date, default: Date.now },
+  status: { type: String, enum: ["pending", "completed", "failed"], default: "completed" },
+  sentAt: { type: Date, required: true, default: Date.now },
 }, { timestamps: true });
 
 /**
@@ -128,10 +128,8 @@ const User = mongoose.models.User || mongoose.model("User", userSchema);
 const Post = mongoose.models.Post || mongoose.model("Post", postSchema);
 const Message = mongoose.models.Message || mongoose.model("Message", messageSchema);
 const Friend = mongoose.models.Friend || mongoose.model("Friend", friendSchema);
-
-// new models
-const Crypto = mongoose.models.Crypto || mongoose.model("Crypto", cryptoSchema);
-const CryptoTransaction = mongoose.models.CryptoTransaction || mongoose.model("CryptoTransaction", cryptoTransactionSchema);
+const Wallet = mongoose.models.Wallet || mongoose.model("Wallet", walletSchema);
+const Transaction = mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
 
 /**
  * Ensure connection is established when this module is imported.
@@ -140,4 +138,4 @@ connectToDatabase().catch((err) => {
   console.error("Failed to connect to MongoDB", err);
 });
 
-export { User, Post, Message, Friend, Crypto, CryptoTransaction, connectToDatabase };
+export { User, Post, Message, Friend, Wallet, Transaction, connectToDatabase };

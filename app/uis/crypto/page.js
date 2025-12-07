@@ -1,49 +1,28 @@
 'use client'
 
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Line } from "react-chartjs-2";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Legend,
-  Filler,
-} from "chart.js";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler);
-
-// Minimal placeholder for the Crypto dashboard page — cleaned so you can start again.
+// Minimal placeholder for the Crypto dashboard page — cleaned and made resilient to API shapes.
 export default function CryptoIndex() {
-  // sample transactions between users (fromId, toId, amount in units of crypto, currency, date)
-  const transactions = useMemo(
-    () => [
-      { id: "t1", fromId: "u100", toId: "u201", amount: 0.1245, currency: "BTC", date: "2025-11-01" },
-      { id: "t2", fromId: "u110", toId: "u100", amount: 1.3, currency: "ETH", date: "2025-11-02" },
-      { id: "t3", fromId: "u100", toId: "u120", amount: 0.01, currency: "BTC", date: "2025-11-03" },
-      { id: "t4", fromId: "u130", toId: "u201", amount: 2.5, currency: "LTC", date: "2025-11-03" },
-      { id: "t5", fromId: "u201", toId: "u140", amount: 0.5, currency: "ETH", date: "2025-11-04" },
-      { id: "t6", fromId: "u150", toId: "u100", amount: 0.005, currency: "BTC", date: "2025-11-05" },
-      { id: "t7", fromId: "u160", toId: "u170", amount: 10, currency: "LTC", date: "2025-11-06" },
-      // ...add more transactions as needed...
-    ],
-    []
-  );
-
-  const currencies = ["BTC", "ETH", "LTC"];
-  const [selectedCurrency, setSelectedCurrency] = useState("BTC");
-
-  // connected user id state (updated from cookie, window globals, localStorage, or server endpoints)
   const [connectedUserId, setConnectedUserId] = useState(null);
   const mountedRef = useRef(false);
-  const router = useRouter();
+  const router = useRouter(); // kept in case you want navigation later
 
   // detection helpers
   const hasWindow = typeof window !== "undefined";
   const hasDocument = typeof document !== "undefined";
+
+  // blocked user ids — treat these as unauthenticated / not-detected
+  function isBlockedUser(id) {
+    if (!id) return false;
+    try {
+      const s = String(id).trim();
+      return s === "691735cf8c82afe3706c8db9";
+    } catch (e) {
+      return false;
+    }
+  }
 
   function getUserIdFromCookie() {
     if (!hasDocument) return null;
@@ -64,7 +43,6 @@ export default function CryptoIndex() {
         const maybe = nd.props?.pageProps?.user?.id || nd.props?.pageProps?.userId || nd.props?.pageProps?.user?._id;
         if (maybe) return maybe;
       }
-      // some apps store a user object on window.app.currentUser
       if (window.app && window.app.currentUser) {
         return window.app.currentUser.id || window.app.currentUser.userId || window.app.currentUser._id || null;
       }
@@ -77,7 +55,6 @@ export default function CryptoIndex() {
   function getUserIdFromStorage() {
     if (!hasWindow) return null;
     try {
-      // check explicit keys first
       const keys = ["connectedUserId", "userId", "currentUserId"];
       for (const k of keys) {
         try {
@@ -85,7 +62,6 @@ export default function CryptoIndex() {
           if (raw) return raw;
         } catch (e) {}
       }
-      // check 'user' object stored as JSON
       try {
         const rawUser = localStorage.getItem("user") || sessionStorage.getItem("user");
         if (rawUser) {
@@ -93,7 +69,6 @@ export default function CryptoIndex() {
           return parsed?.id || parsed?._id || parsed?.userId || null;
         }
       } catch (e) {}
-      // scan for other likely keys (defensive)
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (!key) continue;
@@ -106,7 +81,6 @@ export default function CryptoIndex() {
               const maybe = parsed?.id || parsed?._id || parsed?.userId;
               if (maybe) return maybe;
             } else if (raw.length > 5) {
-              // some sites store a plain id
               return raw;
             }
           } catch (e) {}
@@ -135,28 +109,35 @@ export default function CryptoIndex() {
 
   // central detection function
   async function detectConnectedUserId() {
-    // 1) cookie
     const cookie = getUserIdFromCookie();
-    if (cookie) return String(cookie);
+    if (cookie) {
+      if (isBlockedUser(cookie)) return null;
+      return String(cookie);
+    }
 
-    // 2) window globals
     const w = getUserIdFromWindow();
-    if (w) return String(w);
+    if (w) {
+      if (isBlockedUser(w)) return null;
+      return String(w);
+    }
 
-    // 3) localStorage/sessionStorage
     const s = getUserIdFromStorage();
-    if (s) return String(s);
+    if (s) {
+      if (isBlockedUser(s)) return null;
+      return String(s);
+    }
 
-    // 4) server endpoints (best-effort)
     try {
       const fromApi = await fetchUserFromRoute();
-      if (fromApi) return String(fromApi);
+      if (fromApi) {
+        if (isBlockedUser(fromApi)) return null;
+        return String(fromApi);
+      }
     } catch (e) {}
 
     return null;
   }
 
-  // initial detection + subscribe to storage changes to remain in sync with login/logout flows
   useEffect(() => {
     mountedRef.current = true;
     let canceled = false;
@@ -164,20 +145,19 @@ export default function CryptoIndex() {
     (async () => {
       const id = await detectConnectedUserId();
       if (canceled) return;
-      if (id) setConnectedUserId(String(id));
+      // ensure blocked ids are never used
+      if (id && !isBlockedUser(id)) setConnectedUserId(String(id));
       else setConnectedUserId(null);
     })();
 
     function onStorage(e) {
       try {
         if (!e) return;
-        // if user markers changed, re-run detection
         if (e.key === "connectedUserId" || e.key === "userId" || e.key === "user" || e.key?.startsWith("auth") || e.key === "user-logout-ts") {
-          // small debounce to allow the login/logout flow to fully commit multiple keys
           setTimeout(async () => {
             if (!mountedRef.current) return;
             const id = await detectConnectedUserId();
-            if (id) setConnectedUserId(String(id));
+            if (id && !isBlockedUser(id)) setConnectedUserId(String(id));
             else setConnectedUserId(null);
           }, 120);
         }
@@ -198,156 +178,228 @@ export default function CryptoIndex() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // generate simple mock price history per currency (client-only)
-  function generateSeries(currency, points = 30) {
-    // seed base prices
-    const base = { BTC: 60000, ETH: 3800, LTC: 120 }[currency] ?? 100;
-    const volatility = { BTC: 800, ETH: 120, LTC: 8 }[currency] ?? 5;
-    const out = [];
-    let value = base;
-    for (let i = 0; i < points; i++) {
-      // random-ish walk deterministic-ish by index and currency
-      const drift = Math.sin((i + currency.length) * 0.3) * volatility * 0.2;
-      const noise = ((i * 37 + currency.charCodeAt(0)) % 11 - 5) * (volatility / 40);
-      value = Math.max(1, value + drift + noise);
-      out.push({ x: i, y: Math.round(value * 100) / 100 });
-    }
-    return out;
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Normalize server transaction to UI-friendly shape
+  function normalizeTransaction(t) {
+    // possible source fields:
+    // senderWalletId / sender / fromId
+    // receiverWalletId / receiver / toId
+    // sentAt / createdAt / date
+    // _id / id
+    const id = t.id || t._id || (t._id && String(t._id)) || null;
+    const sentAt = t.sentAt || t.sent_at || t.createdAt || t.created_at || t.date || null;
+    const dateISO = sentAt ? new Date(sentAt).toISOString() : null;
+    const fromId = t.fromId || t.senderWalletId || t.sender || t.from || null;
+    const toId = t.toId || t.receiverWalletId || t.receiver || t.to || null;
+    const amount = typeof t.amount === "number" ? t.amount : Number(t.amount || 0);
+
+    return {
+      // keep raw for debugging
+      raw: t,
+      id,
+      date: dateISO,
+      fromId,
+      toId,
+      amount,
+      status: t.status || null,
+    };
   }
 
-  const series = useMemo(() => generateSeries(selectedCurrency, 40), [selectedCurrency]);
+  // fetch and return normalized array
+  async function fetchAllTransactions(userId) {
+    async function tryFetchJson(path) {
+      try {
+        const res = await fetch(path, { credentials: "same-origin" });
+        if (!res.ok) return null;
+        return await res.json().catch(() => null);
+      } catch (e) {
+        return null;
+      }
+    }
 
-  const filtered = useMemo(
-    () => transactions.filter((t) => t.currency === selectedCurrency),
-    [transactions, selectedCurrency]
-  );
+    // 1) try wallet lookup if we have a userId (userId may be ObjectId)
+    const walletPaths = [
+      userId ? `/api/wallets/user/${encodeURIComponent(userId)}` : null,
+      userId ? `/api/wallet/user/${encodeURIComponent(userId)}` : null,
+      userId ? `/api/users/${encodeURIComponent(userId)}/wallets` : null,
+    ].filter(Boolean);
 
-  const totalVolume = useMemo(
-    () => filtered.reduce((s, t) => s + t.amount, 0),
-    [filtered]
-  );
+    for (const p of walletPaths) {
+      const json = await tryFetchJson(p);
+      if (!json) continue;
+      // server may return { success: true, wallet } or { wallet } or array
+      const wallet = json?.wallet || (Array.isArray(json) && json[0]) || json?.data || null;
+      const walletId = wallet?.walletId || wallet?.walletId === 0 ? wallet.walletId : wallet?._id || wallet?.id || null;
+      if (walletId) {
+        // fetch transactions for that wallet
+        const txPaths = [
+          `/api/wallets/transactions/${encodeURIComponent(walletId)}`,
+          `/api/transactions/${encodeURIComponent(walletId)}`,
+          `/api/transactions?walletId=${encodeURIComponent(walletId)}`,
+        ];
+        for (const tp of txPaths) {
+          const txJson = await tryFetchJson(tp);
+          if (!txJson) continue;
+          const list = Array.isArray(txJson) ? txJson : txJson?.transactions || txJson?.data || txJson?.transactionsData || null;
+          if (Array.isArray(list)) {
+            return list.map(normalizeTransaction);
+          }
+        }
+      }
+    }
 
-  const data = useMemo(() => {
-    return {
-      labels: series.map((s) => `T-${s.x}`),
-      datasets: [
-        {
-          label: `${selectedCurrency} price`,
-          data: series.map((s) => s.y),
-          fill: true,
-          backgroundColor: "rgba(25,118,210,0.08)",
-          borderColor: "#1976d2",
-          tension: 0.25,
-          pointRadius: 0,
-        },
-      ],
-    };
-  }, [series, selectedCurrency]);
+    // 2) treat provided userId as a walletId and try fetch directly
+    if (userId) {
+      const directTxCandidates = [
+        `/api/wallets/transactions/${encodeURIComponent(userId)}`,
+        `/api/transactions/${encodeURIComponent(userId)}`,
+        `/api/transactions?walletId=${encodeURIComponent(userId)}`,
+      ];
+      for (const p of directTxCandidates) {
+        const json = await tryFetchJson(p);
+        if (!json) continue;
+        const list = Array.isArray(json) ? json : json?.transactions || json?.data || null;
+        if (Array.isArray(list)) return list.map(normalizeTransaction);
+      }
+    }
 
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-      tooltip: { mode: "index", intersect: false },
-    },
-    scales: {
-      x: { display: false },
-      y: { ticks: { callback: (v) => v } },
-    },
-  };
+    // 3) try generic endpoints
+    const genericPaths = [`/api/transactions`, `/api/txs`];
+    for (const p of genericPaths) {
+      const json = await tryFetchJson(p);
+      if (!json) continue;
+      const list = Array.isArray(json) ? json : json?.transactions || json?.data || null;
+      if (Array.isArray(list)) return list.map(normalizeTransaction);
+    }
+
+    // nothing found
+    return [];
+  }
+
+  useEffect(() => {
+    let canceled = false;
+    (async () => {
+      if (!mountedRef.current) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const txs = await fetchAllTransactions(connectedUserId);
+        if (canceled) return;
+        setTransactions(txs);
+      } catch (err) {
+        if (!canceled) setError("Failed to load transactions");
+      } finally {
+        if (!canceled) setLoading(false);
+      }
+    })();
+    return () => { canceled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectedUserId]);
+
+  function refresh() {
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const txs = await fetchAllTransactions(connectedUserId);
+        setTransactions(txs);
+      } catch (e) {
+        setError("Failed to refresh transactions");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }
+
+  function formatDate(iso) {
+    if (!iso) return "-";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString();
+    } catch (e) {
+      return iso;
+    }
+  }
 
   return (
     <section style={{ padding: 24, fontFamily: "Arial, sans-serif", maxWidth: 900 }}>
-      <h1 style={{ margin: 0 }}>Crypto Dashboard</h1>
+      <h1 style={{ margin: 0 }}>Wallet Transactions</h1>
       <p style={{ color: "#666", marginTop: 8 }}>
-        Select a currency to view its price chart and transactions between users.
+        Showing all transactions. The page will attempt to load transactions from your backend API.
       </p>
 
       <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <strong>Currency</strong>
-          <select
-            value={selectedCurrency}
-            onChange={(e) => setSelectedCurrency(e.target.value)}
-            style={{ marginLeft: 8, padding: "6px 8px" }}
-          >
-            {currencies.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </label>
+        {/* Connected user display removed per request */}
 
-        <div style={{ marginLeft: "auto", color: "#333" }}>
-          <div style={{ fontSize: 12, color: "#666" }}>Total volume ({selectedCurrency})</div>
-          <div style={{ fontWeight: 600, fontSize: 16 }}>{totalVolume.toLocaleString()}</div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button
+            onClick={() => {
+              // navigate to the dynamic route under app\uis\crypto\[id]\page.js
+              if (connectedUserId) {
+                router.push(`/uis/crypto/${encodeURIComponent(String(connectedUserId))}`);
+              } else {
+                router.push(`/uis/crypto/new`);
+              }
+            }}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 6,
+              border: "1px solid #1976d2",
+              background: "#1976d2",
+              color: "#fff",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+            title={connectedUserId ? `Create transaction for ${connectedUserId}` : "Create transaction"}
+          >
+            Add Transaction
+          </button>
+
+          <button
+            onClick={refresh}
+            style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", background: "#fff", cursor: "pointer" }}
+            title="Refresh transactions"
+          >
+            Refresh
+          </button>
         </div>
       </div>
 
-      <div style={{ marginTop: 16, border: "1px solid #eee", padding: 12, borderRadius: 6, height: 220 }}>
-        {/* Chart.js line chart */}
-        <Line data={data} options={options} />
-      </div>
-
-      {/* NEW: single big action button (navigates to dynamic user page using connectedUserId) */}
-      <div style={{ marginTop: 16, display: "flex", justifyContent: "center" }}>
-        <button
-          onClick={() => {
-            if (connectedUserId) {
-              router.push(`/uis/crypto/${encodeURIComponent(String(connectedUserId))}`);
-            } else {
-              // no connected user detected — navigate to generic /new where the crypto page will attempt to detect and redirect
-              router.push(`/uis/crypto/new`);
-            }
-          }}
-          style={{
-            padding: "12px 20px",
-            background: connectedUserId ? "#0b74de" : "#999",
-            color: "#fff",
-            border: "none",
-            borderRadius: 8,
-            cursor: "pointer",
-            fontSize: 16,
-            fontWeight: 600,
-            opacity: connectedUserId ? 1 : 0.95
-          }}
-          title={connectedUserId ? `Open wallet for ${connectedUserId}` : "No connected user detected"}
-        >
-          Make Transaction
-        </button>
-      </div>
-
-      <section style={{ marginTop: 18 }}>
-        <h2 style={{ margin: "8px 0" }}>Transactions ({selectedCurrency})</h2>
-        {filtered.length === 0 ? (
-          <p style={{ color: "#777" }}>No transactions for {selectedCurrency}.</p>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-            <thead>
-              <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
-                <th style={{ padding: "8px 6px" }}>Date</th>
-                <th style={{ padding: "8px 6px" }}>From (userId)</th>
-                <th style={{ padding: "8px 6px" }}>To (userId)</th>
-                <th style={{ padding: "8px 6px" }}>Amount</th>
-                {/* removed Action column */}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((t) => (
-                <tr key={t.id} style={{ borderBottom: "1px solid #fafafa" }}>
-                  <td style={{ padding: "8px 6px", color: "#555" }}>{t.date}</td>
-                  <td style={{ padding: "8px 6px" }}>{t.fromId}</td>
-                  <td style={{ padding: "8px 6px" }}>{t.toId}</td>
-                  <td style={{ padding: "8px 6px", fontWeight: 600 }}>{t.amount}</td>
-                  {/* removed per-row action button */}
+      <div style={{ marginTop: 16, border: "1px solid #eee", padding: 12, borderRadius: 6 }}>
+        <div style={{ marginTop: 12 }}>
+          {loading ? (
+            <div style={{ color: "#666" }}>Loading transactions...</div>
+          ) : error ? (
+            <div style={{ color: "red" }}>{error}</div>
+          ) : transactions.length === 0 ? (
+            <div style={{ color: "#777" }}>No transactions available.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <thead>
+                <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
+                  <th style={{ padding: "8px 6px" }}>Date</th>
+                  <th style={{ padding: "8px 6px" }}>From Wallet</th>
+                  <th style={{ padding: "8px 6px" }}>To Wallet</th>
+                  <th style={{ padding: "8px 6px" }}>Amount</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+              </thead>
+              <tbody>
+                {transactions.map((t) => (
+                  <tr key={t.id || `${t.fromId}-${t.toId}-${t.date}`} style={{ borderBottom: "1px solid #fafafa" }}>
+                    <td style={{ padding: "8px 6px", color: "#555" }}>{formatDate(t.date)}</td>
+                    <td style={{ padding: "8px 6px" }}>{t.fromId || "-"}</td>
+                    <td style={{ padding: "8px 6px" }}>{t.toId || "-"}</td>
+                    <td style={{ padding: "8px 6px", fontWeight: 600 }}>{Number(t.amount || 0).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

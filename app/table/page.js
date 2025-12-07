@@ -35,7 +35,6 @@ import IconButtonMaterial from "@mui/material/IconButton"
 import SearchIcon from "@mui/icons-material/Search"
 import ClearIcon from "@mui/icons-material/Clear"
 import DeleteIcon from "@mui/icons-material/Delete"
-import EditIcon from "@mui/icons-material/Edit"
 
 /**
  * Client page that fetches users from your API and re-uses the original filter UI.
@@ -44,15 +43,6 @@ import EditIcon from "@mui/icons-material/Edit"
  * - Keeps the original state names: `gender` and `country`.
  * - Expects an API endpoint at /api/users?operation=get-all-users that returns JSON:
  *   { users: [ { _id, id, gender, country, firstName, lastName, email, ... }, ... ] }
- *
- * Added: "Manage Wallet" button per user that opens a dialog allowing:
- * - view wallet (server via GET /api/crypto/user/:userId or local fallback)
- * - create wallet (POST /api/crypto/create-wallet)
- * - top-up (POST /api/crypto/add-balance with { idcrypto, amount })
- * - view transactions (GET /api/crypto/transactions/:idcrypto)
- * - delete wallet (best-effort DELETE /api/crypto/user/:userId; falls back to removing localStorage wallet keys)
- *
- * The backend routes should exist (see app/api/crypto/*). The UI is defensive: it will fall back to localStorage when server endpoints are missing.
  */
 
 export default function Page() {
@@ -69,16 +59,12 @@ export default function Page() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  // wallet manager dialog state
-  const [manageOpen, setManageOpen] = useState(false)
-  const [manageLoading, setManageLoading] = useState(false)
-  const [selectedUser, setSelectedUser] = useState(null)
-  const [wallet, setWallet] = useState(null)
-  const [transactions, setTransactions] = useState([])
-  const [walletError, setWalletError] = useState(null)
-  const [topUpAmount, setTopUpAmount] = useState("")
-  const [creatingWallet, setCreatingWallet] = useState(false)
-  const [deletingWallet, setDeletingWallet] = useState(false)
+  // Wallet manager state
+  const [walletDialogOpen, setWalletDialogOpen] = useState(false)
+  const [walletsLoading, setWalletsLoading] = useState(false)
+  const [walletsError, setWalletsError] = useState(null)
+  const [wallets, setWallets] = useState([])
+  const [selectedUserId, setSelectedUserId] = useState(null)
 
   useEffect(() => {
     fetchUsers()
@@ -123,11 +109,82 @@ export default function Page() {
     }
   }
 
+  async function fetchWalletsForUser(displayId) {
+    if (!displayId) return
+    setWalletsLoading(true)
+    setWalletsError(null)
+
+    const encoded = encodeURIComponent(displayId)
+
+    // Try multiple candidate endpoints (including the /api/crypto routes)
+    const candidates = [
+      `/api/users/${encoded}/wallets`,
+      `/api/crypto/wallets?userId=${encoded}`,
+      `/api/crypto?operation=get-wallets&userId=${encoded}`,
+      `/api/crypto/wallets/${encoded}`,
+      `/api/crypto/${encoded}/wallets`,
+    ]
+
+    let lastError = null
+
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url, { headers: { "Content-Type": "application/json" } })
+        const payload = await res.json().catch(() => ({}))
+
+        // Normalize possible shapes
+        let list = []
+        if (Array.isArray(payload)) {
+          list = payload
+        } else if (Array.isArray(payload.wallets)) {
+          list = payload.wallets
+        } else if (Array.isArray(payload.data)) {
+          list = payload.data
+        } else if (Array.isArray(payload.items)) {
+          list = payload.items
+        }
+
+        if (!res.ok && list.length === 0) {
+          // remember error and try next candidate
+          lastError = payload?.error || `Server returned ${res.status} at ${url}`
+          continue
+        }
+
+        // success
+        setWallets(list)
+        setWalletsLoading(false)
+        return
+      } catch (err) {
+        lastError = err?.message || `Fetch failed for ${url}`
+        // try next
+        continue
+      }
+    }
+
+    // all candidates failed
+    setWalletsError(lastError || "Failed to load wallets")
+    setWallets([])
+    setWalletsLoading(false)
+  }
+
   const handleGenderChange = function (event) {
     setGender(event.target.value)
   }
   const handleCountryChange = function (event) {
     setCountry(event.target.value)
+  }
+
+  const openWalletManager = (displayId) => {
+    setSelectedUserId(displayId)
+    setWalletDialogOpen(true)
+    fetchWalletsForUser(displayId)
+  }
+
+  const closeWalletManager = () => {
+    setWalletDialogOpen(false)
+    setSelectedUserId(null)
+    setWallets([])
+    setWalletsError(null)
   }
 
   // derive unique options from data so UI stays consistent
@@ -181,301 +238,6 @@ export default function Page() {
     setGender("")
     setCountry("")
     setQuery("")
-  }
-
-  // Manage wallet helpers
-
-  function openManageDialog(user) {
-    const uid = user?._id || user?.id || null
-    setSelectedUser(user)
-    setWallet(null)
-    setTransactions([])
-    setWalletError(null)
-    setTopUpAmount("")
-    setManageOpen(true)
-    if (uid) fetchWalletAndTx(uid)
-  }
-
-  function closeManageDialog() {
-    setManageOpen(false)
-    setSelectedUser(null)
-    setWallet(null)
-    setTransactions([])
-    setWalletError(null)
-    setTopUpAmount("")
-  }
-
-  async function fetchWalletAndTx(userId) {
-    setManageLoading(true)
-    setWalletError(null)
-    setWallet(null)
-    setTransactions([])
-    try {
-      // try server wallet first
-      const res = await fetch(`/api/crypto/user/${encodeURIComponent(userId)}`)
-      const data = await res.json().catch(() => ({}))
-      if (res.ok && data && data.success && data.wallet) {
-        const srv = data.wallet
-        // normalize server wallet fields (support idcrypto or idCrypto)
-        const idcrypto = srv.idcrypto || srv.idCrypto || srv.id || srv.idCrypto
-        const normalized = {
-          idcrypto,
-          walletId: srv.walletId || idcrypto || `wallet-${userId}`,
-          owner: srv.userId || userId,
-          balance: srv.balance ?? 0,
-          currency: srv.currency || "CRYPTO",
-          createdAt: srv.createdAt || srv.createdAt || new Date().toISOString(),
-        }
-        setWallet(normalized)
-        // fetch transactions if idcrypto present
-        if (normalized.idcrypto) {
-          await fetchTransactions(normalized.idcrypto)
-        }
-      } else {
-        // no server wallet — try localStorage fallback
-        const local = findLocalWalletForUser(userId)
-        if (local) {
-          setWallet(local)
-          if (local.idcrypto) await fetchTransactions(local.idcrypto)
-        } else {
-          setWallet(null)
-          setWalletError("No wallet found for this user (server/local). You may create one.")
-        }
-      }
-    } catch (e) {
-      // network/other error — try local fallback
-      const local = findLocalWalletForUser(userId)
-      if (local) {
-        setWallet(local)
-        if (local.idcrypto) await fetchTransactions(local.idcrypto)
-      } else {
-        setWalletError("Failed to load wallet (network error).")
-      }
-    } finally {
-      setManageLoading(false)
-    }
-  }
-
-  // find localStorage wallet key for a user (first match) and return parsed wallet
-  function findLocalWalletForUser(userId) {
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i)
-        if (!key || !key.startsWith("wallet:")) continue
-        // key format supported:
-        //  - wallet:<userId>:<idcrypto>   (new, preferred)
-        //  - wallet:<userId>:<currency>   (legacy)
-        if (!key.startsWith(`wallet:${userId}:`)) continue
-        const raw = localStorage.getItem(key)
-        if (!raw) continue
-        try {
-          const parsed = JSON.parse(raw)
-          // normalize parsed shape to ensure idcrypto present when possible
-          const idcrypto = parsed.idcrypto || parsed.idCrypto || parsed.id || key.split(":")[2] || null
-          return {
-            idcrypto,
-            walletId: parsed.walletId || parsed.walletId || parsed.wallet || idcrypto,
-            owner: parsed.owner || parsed.userId || userId,
-            balance: parsed.balance ?? 0,
-            currency: parsed.currency || "CRYPTO",
-            createdAt: parsed.createdAt || new Date().toISOString(),
-          }
-        } catch (e) {
-          // skip parse errors
-          continue
-        }
-      }
-    } catch (e) {
-      // storage unavailable
-    }
-    return null
-  }
-
-  async function createWalletForSelected() {
-    if (!selectedUser) return
-    const userId = selectedUser._id || selectedUser.id
-    setCreatingWallet(true)
-    setWalletError(null)
-    try {
-      const res = await fetch("/api/crypto/create-wallet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (res.ok && json && json.success && json.wallet) {
-        // normalize and set
-        const srv = json.wallet
-        const idcrypto = srv.idcrypto || srv.idCrypto || srv.id || `c_${Date.now().toString(36)}`
-        const normalized = {
-          idcrypto,
-          walletId: srv.walletId || idcrypto,
-          owner: srv.userId || userId,
-          balance: srv.balance ?? 0,
-          currency: srv.currency || "CRYPTO",
-          createdAt: srv.createdAt || new Date().toISOString(),
-        }
-        // persist locally using standardized key: wallet:<owner>:<idcrypto>
-        try {
-          localStorage.setItem(`wallet:${normalized.owner}:${normalized.idcrypto}`, JSON.stringify(normalized))
-        } catch (e) {}
-        setWallet(normalized)
-        setWalletError(null)
-        await fetchTransactions(normalized.idcrypto)
-      } else {
-        const msg = json?.error || `Server returned ${res.status}`
-        setWalletError(`Could not create wallet: ${msg}`)
-      }
-    } catch (e) {
-      setWalletError("Network error creating wallet.")
-    } finally {
-      setCreatingWallet(false)
-    }
-  }
-
-  async function fetchTransactions(idcrypto) {
-    setWalletError(null)
-    try {
-      const res = await fetch(`/api/crypto/transactions/${encodeURIComponent(idcrypto)}`)
-      const json = await res.json().catch(() => ({}))
-      if (res.ok && json && json.success && Array.isArray(json.transactions)) {
-        setTransactions(json.transactions)
-      } else if (Array.isArray(json)) {
-        setTransactions(json)
-      } else {
-        // fallback: try localStorage tx key (tx:<idcrypto>)
-        const raw = localStorage.getItem(`tx:${idcrypto}`)
-        if (raw) {
-          try {
-            setTransactions(JSON.parse(raw))
-            return
-          } catch (e) {}
-        }
-        setTransactions([])
-      }
-    } catch (e) {
-      // network error -> local fallback
-      const raw = localStorage.getItem(`tx:${idcrypto}`)
-      if (raw) {
-        try {
-          setTransactions(JSON.parse(raw))
-        } catch (e) {
-          setTransactions([])
-        }
-      } else {
-        setTransactions([])
-      }
-    }
-  }
-
-  async function topUpWallet() {
-    if (!wallet || !wallet.idcrypto) {
-      setWalletError("No wallet selected to top-up")
-      return
-    }
-    const amt = Number(topUpAmount)
-    if (!amt || isNaN(amt)) {
-      setWalletError("Enter a valid amount")
-      return
-    }
-    setManageLoading(true)
-    setWalletError(null)
-    try {
-      // server endpoint expects idcrypto and amount (see app/api/crypto/route.js -> /add-balance)
-      const res = await fetch("/api/crypto/add-balance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idcrypto: wallet.idcrypto, amount: amt }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (res.ok && json && json.success && json.wallet) {
-        // use server wallet
-        const srv = json.wallet
-        const normalized = {
-          idcrypto: srv.idcrypto || srv.idCrypto || wallet.idcrypto,
-          walletId: srv.walletId || srv.idcrypto || wallet.walletId,
-          owner: srv.userId || wallet.owner,
-          balance: srv.balance ?? wallet.balance + amt,
-          currency: srv.currency || wallet.currency,
-          createdAt: srv.createdAt || wallet.createdAt,
-        }
-        // persist locally using standardized key
-        try {
-          localStorage.setItem(`wallet:${normalized.owner}:${normalized.idcrypto}`, JSON.stringify(normalized))
-        } catch (e) {}
-        setWallet(normalized)
-        await fetchTransactions(normalized.idcrypto)
-      } else {
-        // server not available — update local only (use standardized key)
-        const updated = { ...wallet, balance: Number(wallet.balance) + amt }
-        try {
-          localStorage.setItem(`wallet:${updated.owner}:${updated.idcrypto}`, JSON.stringify(updated))
-          // push a local tx record under tx:<idcrypto>
-          const now = new Date().toISOString()
-          const tx = { id: Math.random().toString(36).slice(2, 9), from: null, to: updated.walletId, amount: amt, at: now, currency: updated.currency }
-          const txKey = `tx:${updated.idcrypto}`
-          const raw = localStorage.getItem(txKey)
-          const list = raw ? JSON.parse(raw) : []
-          list.unshift(tx)
-          localStorage.setItem(txKey, JSON.stringify(list))
-        } catch (e) {}
-        setWallet(updated)
-        await fetchTransactions(updated.idcrypto)
-      }
-      setTopUpAmount("")
-    } catch (e) {
-      setWalletError("Top-up failed")
-    } finally {
-      setManageLoading(false)
-    }
-  }
-
-  async function deleteWallet() {
-    if (!selectedUser) return
-    const userId = selectedUser._id || selectedUser.id
-    setDeletingWallet(true)
-    setWalletError(null)
-    try {
-      // try server delete first (note: you may need to implement this route)
-      const res = await fetch(`/api/crypto/user/${encodeURIComponent(userId)}`, { method: "DELETE" })
-      if (res.ok) {
-        setWallet(null)
-        // also attempt to remove local copies (both legacy and new keys)
-        try {
-          for (let i = localStorage.length - 1; i >= 0; i--) {
-            const key = localStorage.key(i)
-            if (!key) continue
-            if (key.startsWith(`wallet:${userId}:`) || key.startsWith(`wallet:${userId}:`)) localStorage.removeItem(key)
-          }
-        } catch (e) {}
-      } else {
-        // server didn't support delete or returned error — fallback to local removal
-        try {
-          for (let i = localStorage.length - 1; i >= 0; i--) {
-            const key = localStorage.key(i)
-            if (key && key.startsWith(`wallet:${userId}:`)) localStorage.removeItem(key)
-          }
-          setWallet(null)
-          setWalletError("Server delete returned an error; wallet removed locally.")
-        } catch (e) {
-          setWalletError("Delete failed")
-        }
-      }
-    } catch (e) {
-      // network error -> local fallback
-      try {
-        for (let i = localStorage.length - 1; i >= 0; i--) {
-          const key = localStorage.key(i)
-          if (key && key.startsWith(`wallet:${userId}:`)) localStorage.removeItem(key)
-        }
-        setWallet(null)
-        setWalletError("Could not reach server; wallet removed locally.")
-      } catch (e) {
-        setWalletError("Delete failed")
-      }
-    } finally {
-      setDeletingWallet(false)
-    }
   }
 
   return (
@@ -656,16 +418,6 @@ export default function Page() {
                       >
                         Manage
                       </Button>
-
-                      {/* New Manage Wallet button */}
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        startIcon={<EditIcon />}
-                        onClick={() => openManageDialog(item)}
-                      >
-                        Manage Wallet
-                      </Button>
                     </TableCell>
                   </TableRow>
                 )
@@ -675,136 +427,43 @@ export default function Page() {
         </Table>
       </TableContainer>
 
-      {/* Manage Wallet Dialog */}
-      <Dialog open={manageOpen} onClose={closeManageDialog} fullWidth maxWidth="md">
-        <DialogTitle>
-          Manage Wallet {selectedUser ? `for ${selectedUser.pseudo || selectedUser.firstName || selectedUser._id}` : ""}
-        </DialogTitle>
+      {/* Wallet Manager Dialog */}
+      <Dialog open={walletDialogOpen} onClose={closeWalletManager} maxWidth="sm" fullWidth>
+        <DialogTitle>Manage Wallets — {selectedUserId || "—"}</DialogTitle>
         <DialogContent dividers>
-          {manageLoading ? (
-            <Box sx={{ textAlign: "center", py: 4 }}>
+          {walletsLoading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
               <CircularProgress />
             </Box>
+          ) : walletsError ? (
+            <Typography color="error">{walletsError}</Typography>
+          ) : wallets.length === 0 ? (
+            <Typography color="text.secondary">No wallets found for this user.</Typography>
           ) : (
-            <>
-              {wallet ? (
-                <Box>
-                  <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-                    <Box>
-                      <Typography variant="subtitle1">Wallet</Typography>
-                      <Typography variant="body2">idcrypto: {wallet.idcrypto}</Typography>
-                      <Typography variant="body2">walletId: {wallet.walletId}</Typography>
-                      <Typography variant="body2">Owner: {wallet.owner}</Typography>
-                      <Typography variant="body2">Balance: {Number(wallet.balance).toLocaleString()} {wallet.currency}</Typography>
-                    </Box>
-
-                    <Box sx={{ display: "flex", gap: 1 }}>
-                      <TextField
-                        size="small"
-                        placeholder="Amount"
-                        value={topUpAmount}
-                        onChange={(e) => setTopUpAmount(e.target.value)}
-                        sx={{ width: 140 }}
+            <List>
+              {wallets.map((w) => {
+                const wid = w._id || w.id || w.walletId || "—"
+                const balance = w.balance ?? w.amount ?? w.value
+                return (
+                  <React.Fragment key={wid}>
+                    <ListItem alignItems="flex-start">
+                      <ListItemText
+                        primary={wid}
+                        secondary={balance !== undefined ? `Balance: ${balance}` : JSON.stringify(w)}
                       />
-                      <Button variant="contained" onClick={topUpWallet} disabled={manageLoading || creatingWallet}>
-                        Top-up
-                      </Button>
-
-                      <Button
-                        variant="outlined"
-                        color="error"
-                        startIcon={<DeleteIcon />}
-                        onClick={deleteWallet}
-                        disabled={deletingWallet}
-                      >
-                        Delete
-                      </Button>
-                    </Box>
-                  </Stack>
-
-                  <Divider sx={{ my: 1 }} />
-
-                  <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                    Transactions
-                  </Typography>
-
-                  {transactions.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary">No transactions yet.</Typography>
-                  ) : (
-                    <List dense sx={{ maxHeight: 280, overflow: "auto" }}>
-                      {transactions.map((tx) => {
-                        const txId = tx._id || tx.id || Math.random()
-                        const mismatch = tx.currency && wallet && wallet.currency && tx.currency !== wallet.currency
-                        const primaryText = tx.type
-                          ? (tx.type === 'send' ? `Sent ${tx.amount}` : `Received ${tx.amount}`)
-                          : (tx.from ? `Received ${tx.amount}` : `Top-up ${tx.amount}`)
-                        // include tx currency explicitly
-                        const primaryNode = (
-                          <>
-                            <span>{primaryText} {tx.currency ? `(${tx.currency})` : ''}</span>
-                            {mismatch ? (
-                              <Chip label="Different currency" size="small" color="warning" sx={{ ml: 1, height: 22 }} />
-                            ) : null}
-                          </>
-                        )
-                        const secondaryText = tx.from ? `From: ${tx.from}` : `To: ${tx.to || wallet.walletId}`
-                        return (
-                          <ListItem key={txId}>
-                            <ListItemText
-                              primary={primaryNode}
-                              secondary={secondaryText}
-                            />
-                          </ListItem>
-                        )
-                      })}
-                    </List>
-                  )}
-                </Box>
-              ) : (
-                <Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    {walletError || "No wallet found for this user."}
-                  </Typography>
-
-                  <Box sx={{ display: "flex", gap: 1 }}>
-                    <Button variant="contained" onClick={createWalletForSelected} disabled={creatingWallet}>
-                      Create wallet
-                    </Button>
-                    <Button variant="outlined" onClick={() => {
-                      // try local create fallback
-                      const userId = selectedUser?._id || selectedUser?.id
-                      if (!userId) return
-                      const localWallet = {
-                        idcrypto: `local-${userId}-${Date.now().toString(36)}`,
-                        walletId: `local-${userId}-${Math.random().toString(36).slice(2,9)}`,
-                        owner: userId,
-                        balance: 0,
-                        currency: "CRYPTO",
-                        createdAt: new Date().toISOString(),
-                      }
-                      try {
-                        localStorage.setItem(`wallet:${userId}:${localWallet.currency}`, JSON.stringify(localWallet))
-                        setWallet(localWallet)
-                        setWalletError(null)
-                      } catch (e) {
-                        setWalletError("Failed to create local wallet.")
-                      }
-                    }}>
-                      Create local wallet
-                    </Button>
-                  </Box>
-                </Box>
-              )}
-            </>
-          )}
-          {walletError && (
-            <Typography variant="body2" color="error" sx={{ mt: 2 }}>
-              {walletError}
-            </Typography>
+                    </ListItem>
+                    <Divider component="li" />
+                  </React.Fragment>
+                )
+              })}
+            </List>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={closeManageDialog}>Close</Button>
+          <Button onClick={() => fetchWalletsForUser(selectedUserId)} disabled={walletsLoading}>
+            Refresh
+          </Button>
+          <Button onClick={closeWalletManager}>Close</Button>
         </DialogActions>
       </Dialog>
     </Paper>

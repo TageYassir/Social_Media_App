@@ -1,14 +1,14 @@
+// contents of file
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 
-// Adjust path to your models file location. models.js should export { Crypto, CryptoTransaction }.
-const { Crypto, CryptoTransaction } = require('../models');
+const { Wallet, Transaction } = require('../models');
 
-// Helper to generate a short unique crypto id
-function generateIdCrypto() {
+// Helper to generate a short unique wallet id
+function generateWalletId() {
   return (
-    'c_' +
+    'w_' +
     Date.now().toString(36) +
     Math.random()
       .toString(16)
@@ -26,11 +26,11 @@ router.post('/create-wallet', async (req, res) => {
     const { userId } = req.body || {};
     if (!userId) return jsonError(res, 400, 'userId is required');
 
-    let wallet = await Crypto.findOne({ userId }).lean();
+    let wallet = await Wallet.findOne({ userId }).lean();
     if (wallet) return res.json({ success: true, wallet });
 
-    const idcrypto = generateIdCrypto();
-    wallet = await Crypto.create({ idcrypto, userId, balance: 0 });
+    const walletId = generateWalletId();
+    wallet = await Wallet.create({ walletId, userId, balance: 0 });
     return res.json({ success: true, wallet });
   } catch (err) {
     console.error('create-wallet error', err);
@@ -44,7 +44,7 @@ router.get('/user/:userId', async (req, res) => {
     const { userId } = req.params;
     if (!userId) return jsonError(res, 400, 'userId is required');
 
-    const wallet = await Crypto.findOne({ userId }).lean();
+    const wallet = await Wallet.findOne({ userId }).lean();
     if (!wallet) return jsonError(res, 404, 'Wallet not found');
     return res.json({ success: true, wallet });
   } catch (err) {
@@ -53,28 +53,29 @@ router.get('/user/:userId', async (req, res) => {
   }
 });
 
-// Add balance (system top-up). Records a transaction with fromCrypto=null
+// Add balance (system top-up). Records a transaction with senderWalletId='SYSTEM'
 router.post('/add-balance', async (req, res) => {
   try {
-    const { idcrypto, amount } = req.body || {};
+    const { walletId, amount } = req.body || {};
     const amt = Number(amount);
-    if (!idcrypto) return jsonError(res, 400, 'idcrypto is required');
+    if (!walletId) return jsonError(res, 400, 'walletId is required');
     if (!amt || isNaN(amt) || amt <= 0) return jsonError(res, 400, 'amount must be a positive number');
 
     // Atomic increment
-    const wallet = await Crypto.findOneAndUpdate(
-      { idcrypto },
+    const wallet = await Wallet.findOneAndUpdate(
+      { walletId },
       { $inc: { balance: amt } },
       { new: true }
     ).lean();
 
     if (!wallet) return jsonError(res, 404, 'Wallet not found');
 
-    await CryptoTransaction.create({
-      fromCrypto: null,
-      toCrypto: idcrypto,
+    // record top-up as coming from SYSTEM
+    await Transaction.create({
+      senderWalletId: 'SYSTEM',
+      receiverWalletId: walletId,
       amount: amt,
-      note: 'Top-up',
+      status: 'completed',
     });
 
     return res.json({ success: true, wallet });
@@ -84,14 +85,14 @@ router.post('/add-balance', async (req, res) => {
   }
 });
 
-// Transfer from one crypto to another
+// Transfer from one wallet to another
 router.post('/transfer', async (req, res) => {
   const sessionSupported = typeof mongoose.startSession === 'function';
-  const { fromCrypto, toCrypto, amount } = req.body || {};
+  const { fromWalletId, toWalletId, amount } = req.body || {};
   const amt = Number(amount);
 
-  if (!fromCrypto || !toCrypto) return jsonError(res, 400, 'fromCrypto and toCrypto are required');
-  if (fromCrypto === toCrypto) return jsonError(res, 400, 'fromCrypto and toCrypto must be different');
+  if (!fromWalletId || !toWalletId) return jsonError(res, 400, 'fromWalletId and toWalletId are required');
+  if (fromWalletId === toWalletId) return jsonError(res, 400, 'fromWalletId and toWalletId must be different');
   if (!amt || isNaN(amt) || amt <= 0) return jsonError(res, 400, 'amount must be a positive number');
 
   // Use transactions if available
@@ -100,8 +101,8 @@ router.post('/transfer', async (req, res) => {
     session.startTransaction();
     try {
       // Decrement sender if sufficient funds
-      const sender = await Crypto.findOneAndUpdate(
-        { idcrypto: fromCrypto, balance: { $gte: amt } },
+      const sender = await Wallet.findOneAndUpdate(
+        { walletId: fromWalletId, balance: { $gte: amt } },
         { $inc: { balance: -amt } },
         { new: true, session }
       );
@@ -112,8 +113,8 @@ router.post('/transfer', async (req, res) => {
         return jsonError(res, 400, 'Insufficient funds or sender not found');
       }
 
-      const receiver = await Crypto.findOneAndUpdate(
-        { idcrypto: toCrypto },
+      const receiver = await Wallet.findOneAndUpdate(
+        { walletId: toWalletId },
         { $inc: { balance: amt } },
         { new: true, session }
       );
@@ -124,12 +125,13 @@ router.post('/transfer', async (req, res) => {
         return jsonError(res, 404, 'Receiver wallet not found');
       }
 
-      await CryptoTransaction.create(
+      await Transaction.create(
         [
           {
-            fromCrypto,
-            toCrypto,
+            senderWalletId: fromWalletId,
+            receiverWalletId: toWalletId,
             amount: amt,
+            status: 'completed',
           },
         ],
         { session }
@@ -138,8 +140,8 @@ router.post('/transfer', async (req, res) => {
       await session.commitTransaction();
       session.endSession();
 
-      const updatedSender = await Crypto.findOne({ idcrypto: fromCrypto }).lean();
-      const updatedReceiver = await Crypto.findOne({ idcrypto: toCrypto }).lean();
+      const updatedSender = await Wallet.findOne({ walletId: fromWalletId }).lean();
+      const updatedReceiver = await Wallet.findOne({ walletId: toWalletId }).lean();
 
       return res.json({ success: true, sender: updatedSender, receiver: updatedReceiver });
     } catch (err) {
@@ -152,30 +154,31 @@ router.post('/transfer', async (req, res) => {
 
   // Fallback (no transactions): use guarded atomic updates and basic rollback
   try {
-    const sender = await Crypto.findOneAndUpdate(
-      { idcrypto: fromCrypto, balance: { $gte: amt } },
+    const sender = await Wallet.findOneAndUpdate(
+      { walletId: fromWalletId, balance: { $gte: amt } },
       { $inc: { balance: -amt } },
       { new: true }
     );
 
     if (!sender) return jsonError(res, 400, 'Insufficient funds or sender not found');
 
-    const receiver = await Crypto.findOneAndUpdate({ idcrypto: toCrypto }, { $inc: { balance: amt } }, { new: true });
+    const receiver = await Wallet.findOneAndUpdate({ walletId: toWalletId }, { $inc: { balance: amt } }, { new: true });
 
     if (!receiver) {
       // attempt to rollback sender
-      await Crypto.findOneAndUpdate({ idcrypto: fromCrypto }, { $inc: { balance: amt } });
+      await Wallet.findOneAndUpdate({ walletId: fromWalletId }, { $inc: { balance: amt } });
       return jsonError(res, 404, 'Receiver wallet not found; rolled back');
     }
 
-    await CryptoTransaction.create({
-      fromCrypto,
-      toCrypto,
+    await Transaction.create({
+      senderWalletId: fromWalletId,
+      receiverWalletId: toWalletId,
       amount: amt,
+      status: 'completed',
     });
 
-    const updatedSender = await Crypto.findOne({ idcrypto: fromCrypto }).lean();
-    const updatedReceiver = await Crypto.findOne({ idcrypto: toCrypto }).lean();
+    const updatedSender = await Wallet.findOne({ walletId: fromWalletId }).lean();
+    const updatedReceiver = await Wallet.findOne({ walletId: toWalletId }).lean();
 
     return res.json({ success: true, sender: updatedSender, receiver: updatedReceiver });
   } catch (err) {
@@ -184,16 +187,16 @@ router.post('/transfer', async (req, res) => {
   }
 });
 
-// List transactions for an idcrypto
-router.get('/transactions/:idcrypto', async (req, res) => {
+// List transactions for a walletId
+router.get('/transactions/:walletId', async (req, res) => {
   try {
-    const { idcrypto } = req.params;
+    const { walletId } = req.params;
     const limit = Math.min(100, Number(req.query.limit) || 20);
 
-    if (!idcrypto) return jsonError(res, 400, 'idcrypto is required');
+    if (!walletId) return jsonError(res, 400, 'walletId is required');
 
-    const transactions = await CryptoTransaction.find({
-      $or: [{ fromCrypto: idcrypto }, { toCrypto: idcrypto }],
+    const transactions = await Transaction.find({
+      $or: [{ senderWalletId: walletId }, { receiverWalletId: walletId }],
     })
       .sort({ createdAt: -1 })
       .limit(limit)
@@ -206,23 +209,23 @@ router.get('/transactions/:idcrypto', async (req, res) => {
   }
 });
 
-// Stats for an idcrypto: balance, totalSent, totalReceived, txCount
-router.get('/stats/:idcrypto', async (req, res) => {
+// Stats for a walletId: balance, totalSent, totalReceived, txCount
+router.get('/stats/:walletId', async (req, res) => {
   try {
-    const { idcrypto } = req.params;
-    if (!idcrypto) return jsonError(res, 400, 'idcrypto is required');
+    const { walletId } = req.params;
+    if (!walletId) return jsonError(res, 400, 'walletId is required');
 
-    const wallet = await Crypto.findOne({ idcrypto }).lean();
+    const wallet = await Wallet.findOne({ walletId }).lean();
     if (!wallet) return jsonError(res, 404, 'Wallet not found');
 
     // aggregate totals
-    const [sentAgg] = await CryptoTransaction.aggregate([
-      { $match: { fromCrypto: idcrypto } },
+    const [sentAgg] = await Transaction.aggregate([
+      { $match: { senderWalletId: walletId } },
       { $group: { _id: null, totalSent: { $sum: '$amount' }, count: { $sum: 1 } } },
     ]);
 
-    const [recvAgg] = await CryptoTransaction.aggregate([
-      { $match: { toCrypto: idcrypto } },
+    const [recvAgg] = await Transaction.aggregate([
+      { $match: { receiverWalletId: walletId } },
       { $group: { _id: null, totalReceived: { $sum: '$amount' }, count: { $sum: 1 } } },
     ]);
 
@@ -244,4 +247,4 @@ router.get('/stats/:idcrypto', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;
