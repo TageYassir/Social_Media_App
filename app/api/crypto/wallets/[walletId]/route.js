@@ -7,8 +7,10 @@ function jsonError(status, message) {
   return jsonResponse({ success: false, error: message }, status);
 }
 
-export async function GET(req, { params }) {
+export async function GET(req, context) {
   try {
+    // Next requires awaiting the context before using params
+    const { params } = await context;
     const walletId = params?.walletId || null;
     if (!walletId) return jsonError(400, 'walletId is required');
 

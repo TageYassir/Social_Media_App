@@ -66,6 +66,18 @@ export default function Page() {
   const [wallets, setWallets] = useState([])
   const [selectedUserId, setSelectedUserId] = useState(null)
 
+  // per-wallet management state
+  const [selectedWalletId, setSelectedWalletId] = useState(null)
+  const [selectedWalletObj, setSelectedWalletObj] = useState(null)
+  const [amountToAdd, setAmountToAdd] = useState("")
+  const [addingBalance, setAddingBalance] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+
+  const [txs, setTxs] = useState([])
+  const [txsLoading, setTxsLoading] = useState(false)
+  const [txsError, setTxsError] = useState(null)
+  const [showTxs, setShowTxs] = useState(false)
+
   useEffect(() => {
     fetchUsers()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -113,6 +125,10 @@ export default function Page() {
     if (!displayId) return
     setWalletsLoading(true)
     setWalletsError(null)
+    setSelectedWalletId(null)
+    setSelectedWalletObj(null)
+    setTxs([])
+    setShowTxs(false)
 
     const encoded = encodeURIComponent(displayId)
 
@@ -123,6 +139,8 @@ export default function Page() {
       `/api/crypto?operation=get-wallets&userId=${encoded}`,
       `/api/crypto/wallets/${encoded}`,
       `/api/crypto/${encoded}/wallets`,
+      `/api/wallets?userId=${encoded}`,
+      `/api/wallet/user/${encoded}`,
     ]
 
     let lastError = null
@@ -142,6 +160,9 @@ export default function Page() {
           list = payload.data
         } else if (Array.isArray(payload.items)) {
           list = payload.items
+        } else if (payload?.wallet) {
+          // single wallet
+          list = [payload.wallet]
         }
 
         if (!res.ok && list.length === 0) {
@@ -185,6 +206,236 @@ export default function Page() {
     setSelectedUserId(null)
     setWallets([])
     setWalletsError(null)
+    setSelectedWalletId(null)
+    setSelectedWalletObj(null)
+    setTxs([])
+    setShowTxs(false)
+  }
+
+  // per-wallet actions
+  function pickWallet(w) {
+    const wid = w.walletId || w._id || w.id || w.id_str || w._id?.toString()
+    setSelectedWalletId(wid)
+    setSelectedWalletObj(w)
+    setAmountToAdd("")
+    setTxs([])
+    setShowTxs(false)
+    setTxsError(null)
+  }
+
+  async function handleAddBalance() {
+    if (!selectedWalletId) return
+    const amt = Number(amountToAdd)
+    if (!amt || amt <= 0) return alert("Enter a positive amount")
+
+    setAddingBalance(true)
+    try {
+      const candidates = [
+        "/api/crypto/add-balance",
+        "/api/wallets/add-balance",
+        "/api/crypto/addbalance",
+        "/api/crypto/add_balance",
+        "/api/crypto?operation=add-balance",
+        "/api/crypto?operation=adjust-balance",
+        "/api/crypto?operation=topup",
+      ]
+      let respJson = null
+      for (const url of candidates) {
+        try {
+          const method = url.includes("?") ? "POST" : "POST"
+          const target = url.includes("?") ? url : url
+          const res = await fetch(target, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ walletId: selectedWalletId, amount: amt, operation: "add-balance" }),
+            credentials: "same-origin",
+          })
+          if (!res.ok) continue
+          respJson = await res.json().catch(() => null)
+          break
+        } catch (e) {}
+      }
+      if (!respJson) {
+        setWalletsError("Add balance failed (no endpoint responded).")
+        return
+      }
+      // update local wallet object if returned
+      const updated = respJson?.wallet || respJson?.data || respJson?.updatedWallet || respJson?.sender || respJson?.receiver || null
+      if (updated) {
+        const norm = updated.walletId ? updated : { ...updated, walletId: updated.walletId || updated.id || updated._id }
+        // replace in wallets list
+        setWallets((prev) => prev.map((w) => {
+          const wid = w.walletId || w._id || w.id
+          if (String(wid) === String(norm.walletId)) return norm
+          return w
+        }))
+        setSelectedWalletObj(norm)
+        setAmountToAdd("")
+        // refresh transactions (top-up likely recorded)
+        await fetchWalletTransactions(norm.walletId)
+        return
+      }
+      // fallback: try refresh wallets from server
+      await fetchWalletsForUser(selectedUserId)
+    } catch (err) {
+      setWalletsError("Add balance failed.")
+    } finally {
+      setAddingBalance(false)
+    }
+  }
+
+  // New: remove/subtract balance (uses adjust-balance server op)
+  async function handleRemoveBalance() {
+    if (!selectedWalletId) return
+    const amt = Number(amountToAdd)
+    if (!amt || amt <= 0) return alert("Enter a positive amount to remove")
+    if (!confirm(`Remove ${amt} from wallet ${selectedWalletId}? This action will decrease the balance.`)) return
+
+    setAddingBalance(true)
+    try {
+      const candidates = [
+        "/api/crypto/adjust-balance",
+        "/api/crypto/remove-balance",
+        "/api/crypto?operation=adjust-balance",
+        "/api/crypto?operation=remove-balance",
+        "/api/crypto/adjust",
+      ]
+      let respJson = null
+      for (const url of candidates) {
+        try {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            // send negative amount to adjust
+            body: JSON.stringify({ walletId: selectedWalletId, amount: -Math.abs(amt), operation: "adjust-balance" }),
+            credentials: "same-origin",
+          })
+          if (!res.ok) {
+            // capture error body for feedback if available
+            try {
+              const errBody = await res.json().catch(() => null)
+              if (errBody?.error) {
+                respJson = errBody
+                break
+              }
+            } catch (e) {}
+            continue
+          }
+          respJson = await res.json().catch(() => null)
+          break
+        } catch (e) {}
+      }
+      if (!respJson) {
+        setWalletsError("Remove balance failed (no endpoint responded).")
+        return
+      }
+      if (respJson?.error) {
+        setWalletsError(respJson.error)
+        return
+      }
+      const updated = respJson?.wallet || respJson?.data || null
+      if (updated) {
+        const norm = updated.walletId ? updated : { ...updated, walletId: updated.walletId || updated.id || updated._id }
+        setWallets((prev) => prev.map((w) => {
+          const wid = w.walletId || w._id || w.id
+          if (String(wid) === String(norm.walletId)) return norm
+          return w
+        }))
+        setSelectedWalletObj(norm)
+        setAmountToAdd("")
+        await fetchWalletTransactions(norm.walletId)
+        return
+      }
+      // fallback: refresh list
+      await fetchWalletsForUser(selectedUserId)
+    } catch (err) {
+      setWalletsError("Remove balance failed.")
+    } finally {
+      setAddingBalance(false)
+    }
+  }
+
+  async function handleDeleteWallet() {
+    if (!selectedWalletId) return
+    if (!confirm(`Delete wallet ${selectedWalletId} for user ${selectedUserId}? This cannot be undone.`)) return
+    setDeleteLoading(true)
+    try {
+      const candidates = [
+        `/api/crypto/wallets/${encodeURIComponent(selectedWalletId)}`,
+        `/api/wallets/${encodeURIComponent(selectedWalletId)}`,
+        `/api/crypto/delete-wallet/${encodeURIComponent(selectedWalletId)}`,
+        `/api/crypto/wallets/delete/${encodeURIComponent(selectedWalletId)}`,
+      ]
+      let ok = false
+      for (const url of candidates) {
+        try {
+          const res = await fetch(url, { method: "DELETE", credentials: "same-origin" })
+          if (!res.ok) continue
+          ok = true
+          break
+        } catch (e) {}
+      }
+      if (!ok) {
+        setWalletsError("Delete failed (no delete endpoint responded).")
+      } else {
+        // remove from local list
+        setWallets((prev) => prev.filter((w) => {
+          const wid = w.walletId || w._id || w.id
+          return String(wid) !== String(selectedWalletId)
+        }))
+        setSelectedWalletId(null)
+        setSelectedWalletObj(null)
+        setTxs([])
+        setShowTxs(false)
+      }
+    } catch (err) {
+      setWalletsError("Delete failed.")
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
+  async function fetchWalletTransactions(wid) {
+    if (!wid) return
+    setTxsLoading(true)
+    setTxsError(null)
+    setTxs([])
+    setShowTxs(true)
+    try {
+      const wEnc = encodeURIComponent(wid)
+      const candidates = [
+        `/api/crypto/transactions/${wEnc}`,
+        `/api/transactions/${wEnc}`,
+        `/api/transactions?walletId=${wEnc}`,
+        `/api/wallets/transactions/${wEnc}`,
+        `/api/wallets/transactions?walletId=${wEnc}`,
+        `/api/crypto?operation=get-transactions&walletId=${wEnc}`,
+      ]
+      let found = null
+      for (const url of candidates) {
+        try {
+          const res = await fetch(url, { credentials: "same-origin" })
+          if (!res.ok) continue
+          const j = await res.json().catch(() => null)
+          const list = Array.isArray(j) ? j : j?.transactions || j?.data || j?.items || null
+          if (Array.isArray(list)) {
+            found = list
+            break
+          }
+        } catch (e) {}
+      }
+      if (!found) {
+        setTxsError("No transactions endpoint responded or no transactions found.")
+        setTxs([])
+      } else {
+        setTxs(found)
+      }
+    } catch (err) {
+      setTxsError("Failed to load transactions.")
+      setTxs([])
+    } finally {
+      setTxsLoading(false)
+    }
   }
 
   // derive unique options from data so UI stays consistent
@@ -418,6 +669,14 @@ export default function Page() {
                       >
                         Manage
                       </Button>
+
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => openWalletManager(item._id || item.id || displayId)}
+                      >
+                        Manage Wallet
+                      </Button>
                     </TableCell>
                   </TableRow>
                 )
@@ -428,7 +687,7 @@ export default function Page() {
       </TableContainer>
 
       {/* Wallet Manager Dialog */}
-      <Dialog open={walletDialogOpen} onClose={closeWalletManager} maxWidth="sm" fullWidth>
+      <Dialog open={walletDialogOpen} onClose={closeWalletManager} maxWidth="md" fullWidth>
         <DialogTitle>Manage Wallets — {selectedUserId || "—"}</DialogTitle>
         <DialogContent dividers>
           {walletsLoading ? (
@@ -440,23 +699,123 @@ export default function Page() {
           ) : wallets.length === 0 ? (
             <Typography color="text.secondary">No wallets found for this user.</Typography>
           ) : (
-            <List>
-              {wallets.map((w) => {
-                const wid = w._id || w.id || w.walletId || "—"
-                const balance = w.balance ?? w.amount ?? w.value
-                return (
-                  <React.Fragment key={wid}>
-                    <ListItem alignItems="flex-start">
-                      <ListItemText
-                        primary={wid}
-                        secondary={balance !== undefined ? `Balance: ${balance}` : JSON.stringify(w)}
-                      />
-                    </ListItem>
-                    <Divider component="li" />
-                  </React.Fragment>
-                )
-              })}
-            </List>
+            <Box>
+              <List>
+                {wallets.map((w) => {
+                  const wid = w.walletId || w._id || w.id || "—"
+                  const balance = (typeof w.balance !== "undefined") ? w.balance : (w.amount ?? w.value ?? "—")
+                  const isSelected = String(wid) === String(selectedWalletId)
+                  return (
+                    <React.Fragment key={wid}>
+                      <ListItem
+                        alignItems="flex-start"
+                        secondaryAction={
+                          <Box sx={{ display: "flex", gap: 1 }}>
+                            <Button size="small" variant={isSelected ? "contained" : "outlined"} onClick={() => pickWallet(w)}>
+                              {isSelected ? "Selected" : "Select"}
+                            </Button>
+                            {/* Transactions button removed as requested */}
+                          </Box>
+                        }
+                      >
+                        <ListItemText
+                          primary={wid}
+                          secondary={balance !== undefined ? `Balance: ${balance}` : JSON.stringify(w)}
+                        />
+                      </ListItem>
+                      <Divider component="li" />
+                    </React.Fragment>
+                  )
+                })}
+              </List>
+
+              {/* Selected wallet controls */}
+              {selectedWalletId ? (
+                <Box sx={{ mt: 2, display: "flex", flexDirection: "column", gap: 2 }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                    <Typography variant="subtitle1">Wallet: {selectedWalletId}</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Balance: {selectedWalletObj ? (selectedWalletObj.balance ?? "—") : "—"}
+                    </Typography>
+                    <Box sx={{ flex: 1 }} />
+                    <IconButton onClick={handleDeleteWallet} disabled={deleteLoading} color="error" title="Delete Wallet">
+                      <DeleteIcon />
+                    </IconButton>
+                  </Box>
+
+                  <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+                    <TextField
+                      size="small"
+                      label="Amount"
+                      type="number"
+                      value={amountToAdd}
+                      onChange={(e) => setAmountToAdd(e.target.value)}
+                      sx={{ width: 160 }}
+                      inputProps={{ min: 0, step: "any" }}
+                    />
+                    <Button variant="contained" onClick={handleAddBalance} disabled={addingBalance}>
+                      {addingBalance ? "Processing..." : "Add Balance"}
+                    </Button>
+
+                    <Button variant="outlined" color="warning" onClick={handleRemoveBalance} disabled={addingBalance}>
+                      {addingBalance ? "Processing..." : "Remove Balance"}
+                    </Button>
+
+                    <Button variant="outlined" onClick={() => fetchWalletTransactions(selectedWalletId)} disabled={txsLoading}>
+                      Refresh Transactions
+                    </Button>
+
+                    <Button variant="text" onClick={() => setShowTxs((s) => !s)}>
+                      {showTxs ? "Hide Transactions" : "Show Transactions"}
+                    </Button>
+                  </Box>
+
+                  {/* Transactions area */}
+                  {showTxs ? (
+                    <Box sx={{ mt: 1 }}>
+                      {txsLoading ? (
+                        <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
+                          <CircularProgress size={20} />
+                        </Box>
+                      ) : txsError ? (
+                        <Typography color="error">{txsError}</Typography>
+                      ) : txs.length === 0 ? (
+                        <Typography color="text.secondary">No transactions found.</Typography>
+                      ) : (
+                        <TableContainer component={Paper} variant="outlined" sx={{ boxShadow: "none", maxHeight: 320, overflow: "auto" }}>
+                          <Table size="small" stickyHeader>
+                            <TableHead>
+                              <TableRow>
+                                <TableCell>Date</TableCell>
+                                <TableCell>From</TableCell>
+                                <TableCell>To</TableCell>
+                                <TableCell>Amount</TableCell>
+                                <TableCell>Status</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {txs.map((t) => {
+                                const id = t.id || t._id || (t._id && String(t._id)) || Math.random()
+                                const date = t.sentAt || t.createdAt || t.date || t.sent_at || ""
+                                return (
+                                  <TableRow key={id}>
+                                    <TableCell>{date ? new Date(date).toLocaleString() : "-"}</TableCell>
+                                    <TableCell>{t.senderWalletId || t.from || "-"}</TableCell>
+                                    <TableCell>{t.receiverWalletId || t.to || "-"}</TableCell>
+                                    <TableCell>{typeof t.amount === "number" ? t.amount : (t.amount || "-")}</TableCell>
+                                    <TableCell>{t.status || "-"}</TableCell>
+                                  </TableRow>
+                                )
+                              })}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      )}
+                    </Box>
+                  ) : null}
+                </Box>
+              ) : null}
+            </Box>
           )}
         </DialogContent>
         <DialogActions>

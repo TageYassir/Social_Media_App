@@ -183,6 +183,16 @@ export default function CryptoIndex() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // new: mobile detection
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const check = () => setIsMobile(window.innerWidth <= 640);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
   // Normalize server transaction to UI-friendly shape
   function normalizeTransaction(t) {
     const id = t.id || t._id || (t._id && String(t._id)) || null;
@@ -353,14 +363,20 @@ export default function CryptoIndex() {
   }
 
   return (
-    <section style={{ padding: 24, fontFamily: "Arial, sans-serif", maxWidth: 900 }}>
-      <h1 style={{ margin: 0 }}>Wallet Transactions</h1>
-      <p style={{ color: "#666", marginTop: 8 }}>
+    <section style={{ padding: isMobile ? 16 : 24, fontFamily: "Arial, sans-serif", maxWidth: 900, margin: '0 auto', boxSizing: 'border-box' }}>
+      <h1 style={{ margin: 0, fontSize: isMobile ? 18 : 22 }}>Wallet Transactions</h1>
+      <p style={{ color: "#666", marginTop: 8, fontSize: isMobile ? 13 : 14 }}>
         Showing transactions. The page will attempt many common API paths to locate transactions.
       </p>
 
       <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+        <div style={{
+          marginLeft: isMobile ? 0 : "auto",
+          display: "flex",
+          gap: 8,
+          flexDirection: isMobile ? 'column' : 'row',
+          width: isMobile ? '100%' : 'auto'
+        }}>
           <button
             onClick={() => {
               if (connectedUserId) {
@@ -377,6 +393,7 @@ export default function CryptoIndex() {
               color: "#fff",
               cursor: "pointer",
               fontWeight: 600,
+              width: isMobile ? '100%' : 'auto'
             }}
             title={connectedUserId ? `Create transaction for ${connectedUserId}` : "Create transaction"}
           >
@@ -385,7 +402,14 @@ export default function CryptoIndex() {
 
           <button
             onClick={refresh}
-            style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", background: "#fff", cursor: "pointer" }}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 6,
+              border: "1px solid #ddd",
+              background: "#fff",
+              cursor: "pointer",
+              width: isMobile ? '100%' : 'auto'
+            }}
             title="Refresh transactions"
           >
             Refresh
@@ -393,7 +417,7 @@ export default function CryptoIndex() {
         </div>
       </div>
 
-      <div style={{ marginTop: 16, border: "1px solid #eee", padding: 12, borderRadius: 6 }}>
+      <div style={{ marginTop: 16, border: "1px solid #eee", padding: isMobile ? 10 : 12, borderRadius: 6 }}>
         <div style={{ marginTop: 12 }}>
           {loading ? (
             <div style={{ color: "#666" }}>Loading transactions...</div>
@@ -402,26 +426,57 @@ export default function CryptoIndex() {
           ) : transactions.length === 0 ? (
             <div style={{ color: "#777" }}>No transactions available.</div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-              <thead>
-                <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
-                  <th style={{ padding: "8px 6px" }}>Date</th>
-                  <th style={{ padding: "8px 6px" }}>From Wallet</th>
-                  <th style={{ padding: "8px 6px" }}>To Wallet</th>
-                  <th style={{ padding: "8px 6px" }}>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transactions.map((t) => (
-                  <tr key={t.id || `${t.fromId}-${t.toId}-${t.date}`} style={{ borderBottom: "1px solid #fafafa" }}>
-                    <td style={{ padding: "8px 6px", color: "#555" }}>{formatDate(t.date)}</td>
-                    <td style={{ padding: "8px 6px" }}>{t.fromId || "-"}</td>
-                    <td style={{ padding: "8px 6px" }}>{t.toId || "-"}</td>
-                    <td style={{ padding: "8px 6px", fontWeight: 600 }}>{Number(t.amount || 0).toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            // responsive: table on desktop, stacked cards on mobile
+            isMobile ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {transactions.map((t) => {
+                  const date = formatDate(t.date);
+                  const from = t.fromId || "-";
+                  const to = t.toId || "-";
+                  const amount = Number(t.amount || 0).toFixed(2);
+                  return (
+                    <div key={t.id || `${from}-${to}-${t.date}`} style={{ background: '#fff', padding: 10, borderRadius: 8, boxShadow: '0 0 0 1px #f3f3f3 inset' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14 }}>{amount} <span style={{ fontWeight: 500, color: '#666' }}>USD</span></div>
+                          <div style={{ fontSize: 13, color: '#444', marginTop: 6 }}>
+                            <div style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>From: {from}</div>
+                            <div style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>To: {to}</div>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right', minWidth: 92 }}>
+                          <div style={{ fontSize: 12, color: t.status === 'ok' ? '#064' : '#a33', fontWeight: 600 }}>{t.status || '-'}</div>
+                          <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>{date}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+                  <thead>
+                    <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
+                      <th style={{ padding: "8px 6px" }}>Date</th>
+                      <th style={{ padding: "8px 6px" }}>From Wallet</th>
+                      <th style={{ padding: "8px 6px" }}>To Wallet</th>
+                      <th style={{ padding: "8px 6px" }}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transactions.map((t) => (
+                      <tr key={t.id || `${t.fromId}-${t.toId}-${t.date}`} style={{ borderBottom: "1px solid #fafafa" }}>
+                        <td style={{ padding: "8px 6px", color: "#555" }}>{formatDate(t.date)}</td>
+                        <td style={{ padding: "8px 6px" }}>{t.fromId || "-"}</td>
+                        <td style={{ padding: "8px 6px" }}>{t.toId || "-"}</td>
+                        <td style={{ padding: "8px 6px", fontWeight: 600 }}>{Number(t.amount || 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           )}
         </div>
       </div>
