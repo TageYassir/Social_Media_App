@@ -132,6 +132,17 @@ const transactionSchema = new mongoose.Schema({
   sentAt: { type: Date, required: true, default: Date.now },
 }, { timestamps: true });
 
+const EthersTxSchema = new mongoose.Schema({
+  userId: { type: String, index: true, default: null }, // optional link to your users
+  from: { type: String, required: true, index: true },
+  to: { type: String, required: true, index: true },
+  value: { type: String, required: true }, // store as string (wei)
+  hash: { type: String, required: true, unique: true },
+  chainId: { type: Number, default: null },
+  status: { type: String, enum: ['pending', 'confirmed', 'failed'], default: 'pending' },
+  timestamp: { type: Date, default: Date.now },
+});
+
 /**
  * Avoid model overwrite in dev / hot-reload environments
  */
@@ -141,6 +152,7 @@ const Message = mongoose.models.Message || mongoose.model("Message", messageSche
 const Friend = mongoose.models.Friend || mongoose.model("Friend", friendSchema);
 const Wallet = mongoose.models.Wallet || mongoose.model("Wallet", walletSchema);
 const Transaction = mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
+const EthersTx = mongoose.models.EthersTx || mongoose.model('EthersTx', EthersTxSchema);
 
 /**
  * Ensure connection is established when this module is imported.

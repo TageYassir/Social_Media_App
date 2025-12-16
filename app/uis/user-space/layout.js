@@ -390,7 +390,7 @@ export default function RootLayout({ children }) {
               <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/all-users")} label="Community" icon={<PeopleOutline />} />
               <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/chat")} label="Chat" icon={<MessageOutlined />} />
               <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/profile")} label="Profile" icon={<AccountCircle />} />
-              <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/crypto")} label="Crypto" icon={<CurrencyBitcoin />} />
+              <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/crypto-ethers")} label="Crypto" icon={<CurrencyBitcoin />} />
             </BottomNavigation>
           </Paper>
         </Box>
