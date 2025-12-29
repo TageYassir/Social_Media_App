@@ -1,3 +1,4 @@
+// File: app/uis/user-space/profile/page.js
 "use client"
 
 /** React MUI Imports */
@@ -27,7 +28,9 @@ import { useEffect, useState } from "react"
 /** Next Navigation */
 import { useRouter } from "next/navigation"
 /** Icons Imports */
-import { Settings, PhotoLibrary, Edit } from "@mui/icons-material"
+import { AddCircle, PhotoLibrary, Edit } from "@mui/icons-material"
+/** Components */
+import PostCard from "@/components/Creation/PostCard"
 
 // Tab Panel Component
 function TabPanel({ children, value, index, ...other }) {
@@ -221,6 +224,7 @@ export default function ProfilePage() {
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadingPosts, setLoadingPosts] = useState(false)
   const [friendsCount, setFriendsCount] = useState(null)
 
   // robust friends count helper for current user
@@ -315,7 +319,7 @@ export default function ProfilePage() {
     const run = async () => {
       if (!currentUser?._id && !currentUser?.id) return
       try {
-        const userId = currentUser.__id || currentUser.id
+        const userId = currentUser._id || currentUser.id
         const count = await fetchFriendsCountFor(userId)
         setFriendsCount(typeof count === 'number' ? count : 0)
       } catch (e) {
@@ -325,20 +329,25 @@ export default function ProfilePage() {
     run()
   }, [currentUser])
 
-  // Load user's posts
+  // Load user's posts - UPDATED API CALL
   useEffect(() => {
     const loadPosts = async () => {
       if (!currentUser?._id && !currentUser?.id) return
       
       try {
+        setLoadingPosts(true)
         const userId = currentUser._id || currentUser.id
-        const response = await fetch(`/api/posts?operation=get-by-user&userId=${userId}`)
+        // Updated API call to use new endpoint
+        const response = await fetch(`/api/posts/user/${userId}`)
         if (response.ok) {
           const data = await response.json()
           setPosts(data.posts || [])
         }
       } catch (error) {
         console.error('Failed to load posts:', error)
+        setPosts([])
+      } finally {
+        setLoadingPosts(false)
       }
     }
 
@@ -395,8 +404,12 @@ export default function ProfilePage() {
         <Typography variant="h4" sx={{ fontWeight: 600 }}>
           Profile
         </Typography>
-        <IconButton onClick={() => router.push('/uis/user-space/settings')}>
-          <Settings />
+        <IconButton
+          color="primary"
+          onClick={() => router.push('/uis/user-space/creation')}
+          aria-label="Create"
+        >
+          <AddCircle />
         </IconButton>
       </Box>
 
@@ -435,11 +448,11 @@ export default function ProfilePage() {
           </Button>
         </Box>
 
-        {/* Stats */}
+        {/* Stats - SHOWS BOTH POSTS AND FRIENDS COUNT */}
         <Box sx={{ display: 'flex', gap: 4, mt: 2 }}>
           <Box sx={{ textAlign: 'center' }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              {posts.length}
+              {loadingPosts ? <CircularProgress size={18} /> : posts.length}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Posts
@@ -481,7 +494,14 @@ export default function ProfilePage() {
         </Tabs>
 
         <TabPanel value={tabValue} index={0}>
-          {posts.length === 0 ? (
+          {loadingPosts ? (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <CircularProgress />
+              <Typography variant="body2" sx={{ mt: 2 }}>
+                Loading posts...
+              </Typography>
+            </Box>
+          ) : posts.length === 0 ? (
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <PhotoLibrary sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
               <Typography variant="h6" color="text.secondary">
@@ -492,29 +512,11 @@ export default function ProfilePage() {
               </Typography>
             </Box>
           ) : (
-            <Grid container spacing={2}>
-              {posts.map((post, index) => (
-                <Grid item xs={12} sm={6} md={4} key={post._id || index}>
-                  <Card>
-                    <CardMedia
-                      component="div"
-                      sx={{
-                        height: 200,
-                        bgcolor: 'grey.100',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        p: 2
-                      }}
-                    >
-                      <Typography variant="body2" color="text.secondary" align="center">
-                        {post.content || 'Post content'}
-                      </Typography>
-                    </CardMedia>
-                  </Card>
-                </Grid>
+            <Box>
+              {posts.map((post) => (
+                <PostCard key={post._id} post={post} />
               ))}
-            </Grid>
+            </Box>
           )}
         </TabPanel>
       </Paper>

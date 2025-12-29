@@ -1,0 +1,399 @@
+/* Coinnect Creation UI - Updated CSS
+   Prefix: cn-
+   Enhancements:
+   - Proper separation between Close (X) and Publish buttons
+   - Cleaner modal header layout
+   - Improved accessibility and spacing
+*/
+
+/* Palette */
+:root {
+  --cn-bg: #f6f8fb;
+  --cn-surface: #ffffff;
+  --cn-accent: #0366d6;
+  --cn-accent-2: #0a84ff;
+  --cn-muted: #6b7280;
+  --cn-border: #e6e9ef;
+  --cn-shadow: 0 6px 18px rgba(11, 22, 45, 0.06);
+  --cn-radius: 12px;
+  --cn-radius-sm: 8px;
+}
+
+/* Layout root */
+.cn-creation-root {
+  min-height: 100vh;
+  width: 100%;
+  background: linear-gradient(180deg, var(--cn-bg), #f2f5fb 60%);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 36px 24px;
+  box-sizing: border-box;
+}
+
+/* Main layout container */
+.cn-creation-layout {
+  width: 100%;
+  max-width: 1200px;
+  background: transparent;
+}
+
+/* Header */
+.cn-creation-header {
+  margin-bottom: 20px;
+  padding: 18px;
+}
+
+.cn-creation-header h1 {
+  margin: 0;
+  font-size: 28px;
+  color: #0b2540;
+  font-weight: 600;
+}
+
+.cn-sub {
+  margin: 6px 0 0 0;
+  color: var(--cn-muted);
+  font-size: 14px;
+}
+
+/* Choices */
+.cn-choices {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+@media (min-width: 820px) {
+  .cn-choices {
+    grid-template-columns: 1fr 1fr;
+    gap: 26px;
+  }
+}
+
+/* Choice card */
+.cn-choice-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: linear-gradient(180deg, var(--cn-surface), #fbfdff);
+  border: 1px solid var(--cn-border);
+  padding: 18px;
+  border-radius: var(--cn-radius);
+  box-shadow: var(--cn-shadow);
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+  outline: none;
+  border-left: 4px solid transparent;
+}
+
+.cn-choice-card:hover,
+.cn-choice-card:focus {
+  transform: translateY(-6px);
+  box-shadow: 0 10px 30px rgba(11, 22, 45, 0.08);
+}
+
+.cn-choice-card[aria-pressed="true"] {
+  border-left-color: var(--cn-accent);
+}
+
+/* Choice graphic */
+.cn-choice-graphic {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(3,102,214,0.08), rgba(10,132,255,0.03));
+  color: var(--cn-accent);
+}
+
+/* Choice body */
+.cn-choice-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.cn-choice-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #08122a;
+}
+
+.cn-choice-sub {
+  color: var(--cn-muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+/* CTA */
+.cn-choice-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 84px;
+}
+
+.cn-cta {
+  background: linear-gradient(90deg, var(--cn-accent), var(--cn-accent-2));
+  color: white;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 13px;
+  box-shadow: 0 6px 18px rgba(3,102,214,0.15);
+}
+
+/* Footer */
+.cn-creation-footer {
+  margin-top: 18px;
+  padding: 12px 18px;
+  color: var(--cn-muted);
+  font-size: 13px;
+}
+
+/* ----------------- Modal ----------------- */
+
+.cn-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 18, 32, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6000;
+  padding: 22px;
+}
+
+/* Modal sheet */
+.cn-modal-sheet {
+  width: 100%;
+  max-width: 760px;
+  background: var(--cn-surface);
+  border-radius: 14px;
+  box-shadow: var(--cn-shadow);
+  border: 1px solid var(--cn-border);
+  position: relative;
+  overflow: hidden;
+}
+
+.cn-modal-wide {
+  max-width: 960px;
+}
+
+/* Modal header (Title, Publish, Close) */
+.cn-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--cn-border);
+  position: relative;
+}
+
+.cn-modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #08122a;
+  font-weight: 650;
+}
+
+/* Primary action (Publish) */
+.cn-action-primary {
+  background: linear-gradient(90deg, var(--cn-accent), var(--cn-accent-2));
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(3,102,214,0.12);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.cn-action-primary:hover {
+  transform: translateY(-1px);
+}
+
+.cn-action-primary[disabled],
+.cn-action-primary[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Close button — now offset properly */
+.cn-modal-close {
+  position: absolute;
+  top: 14px;
+  right: -10px; /* shifted outside modal so it doesn’t overlap Publish */
+  background: white;
+  border: 1px solid var(--cn-border);
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cn-muted);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.cn-modal-close:hover {
+  background: #f5f5f5;
+  color: var(--cn-accent);
+}
+
+/* Modal content */
+.cn-modal-content {
+  padding: 18px;
+}
+
+/* User row */
+.cn-post-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+}
+
+.cn-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(3,102,214,0.06), rgba(3,102,214,0.02));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cn-accent);
+}
+
+.cn-user-meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.cn-user-name {
+  font-weight: 600;
+  color: #07122a;
+}
+
+.cn-user-handle {
+  color: var(--cn-muted);
+  font-size: 13px;
+}
+
+/* Textarea */
+.cn-post-textarea {
+  width: 100%;
+  border: none;
+  resize: vertical;
+  outline: none;
+  font-size: 15px;
+  padding: 14px 0;
+  color: #08122a;
+  background: transparent;
+}
+
+/* File preview */
+.cn-file-preview {
+  padding: 8px 0 0 0;
+  margin-top: 6px;
+}
+
+.cn-selected-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--cn-border);
+  background: #fbfdff;
+  color: var(--cn-muted);
+}
+
+.cn-filename {
+  font-size: 13px;
+  color: #082033;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cn-clear-file {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 6px;
+  color: var(--cn-muted);
+}
+
+.cn-no-file {
+  font-size: 13px;
+  color: var(--cn-muted);
+}
+
+/* Action bar */
+.cn-action-bar {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cn-border);
+}
+
+.cn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--cn-accent);
+  box-shadow: none;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.cn-action:hover {
+  background: rgba(3,102,214,0.04);
+  transform: translateY(-2px);
+}
+
+/* Feed actions */
+.cn-feed-body {
+  padding: 12px 0;
+}
+
+.cn-feed-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .cn-modal-sheet {
+    max-width: 100%;
+    border-radius: 12px;
+  }
+  .cn-choice-graphic {
+    width: 56px;
+    height: 56px;
+  }
+  .cn-choice-card {
+    padding: 14px;
+  }
+}

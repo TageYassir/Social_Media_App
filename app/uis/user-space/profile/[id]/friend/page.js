@@ -1,3 +1,4 @@
+// File: app/uis/user-space/profile/[id]/friend/page.js
 'use client'
 
 /** React MUI Imports */
@@ -10,9 +11,6 @@ import {
   Paper, 
   Tabs, 
   Tab, 
-  Grid, 
-  Card, 
-  CardMedia,
   CircularProgress,
   IconButton
 } from "@mui/material"
@@ -22,6 +20,8 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 /** Icons Imports */
 import { PhotoLibrary } from "@mui/icons-material"
+/** Components */
+import PostCard from "@/components/Creation/PostCard"
 
 /**
  * Friend profile page
@@ -207,16 +207,17 @@ export default function FriendProfilePage() {
     return () => { mounted = false }
   }, [profileUser, targetId])
 
-  // Load user's posts
+  // Load user's posts - UPDATED API CALL
   useEffect(() => {
     const loadPosts = async () => {
       if (!targetId) return
       setLoadingPosts(true)
       try {
-        const response = await fetch(`/api/posts?operation=get-by-user&userId=${encodeURIComponent(targetId)}`)
+        // Updated API call to use new endpoint
+        const response = await fetch(`/api/posts/user/${targetId}`)
         if (response.ok) {
-          const data = await response.json().catch(() => null)
-          setPosts(data?.posts || [])
+          const data = await response.json()
+          setPosts(data.posts || [])
         } else {
           setPosts([])
         }
@@ -360,7 +361,14 @@ export default function FriendProfilePage() {
         </Tabs>
 
         <TabPanel value={tabValue} index={0}>
-          {posts.length === 0 ? (
+          {loadingPosts ? (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <CircularProgress />
+              <Typography variant="body2" sx={{ mt: 2 }}>
+                Loading posts...
+              </Typography>
+            </Box>
+          ) : posts.length === 0 ? (
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <PhotoLibrary sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
               <Typography variant="h6" color="text.secondary">
@@ -371,29 +379,11 @@ export default function FriendProfilePage() {
               </Typography>
             </Box>
           ) : (
-            <Grid container spacing={2}>
-              {posts.map((post, index) => (
-                <Grid item xs={12} sm={6} md={4} key={post._id || index}>
-                  <Card>
-                    <CardMedia
-                      component="div"
-                      sx={{
-                        height: 200,
-                        bgcolor: 'grey.100',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        p: 2
-                      }}
-                    >
-                      <Typography variant="body2" color="text.secondary" align="center">
-                        {post.content || 'Post content'}
-                      </Typography>
-                    </CardMedia>
-                  </Card>
-                </Grid>
+            <Box>
+              {posts.map((post) => (
+                <PostCard key={post._id} post={post} />
               ))}
-            </Grid>
+            </Box>
           )}
         </TabPanel>
       </Paper>

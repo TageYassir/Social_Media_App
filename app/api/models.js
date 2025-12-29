@@ -57,12 +57,6 @@ const userSchema = new mongoose.Schema({
   recoveryCode: { type: String, default: null },
 }, { timestamps: true });
 
-const postSchema = new mongoose.Schema({
-  content: { type: String, required: true },
-  dateTime: { type: Date, required: true, default: Date.now },
-  user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-}, { timestamps: true });
-
 /**
  * Message schema - stores a single direct message between two users.
  * Fields:
@@ -72,8 +66,8 @@ const postSchema = new mongoose.Schema({
  * - sentAt: Date
  * - attachments: array of files { type, url, filename, size, mimeType }
  */
+// Fix: remove `_id` as a field inside the sub-schema; keep option `_id: false`
 const attachmentSubSchema = new mongoose.Schema({
-  _id: false,
   type: { type: String }, // 'image' | 'audio' | other
   url: { type: String, required: true },
   filename: { type: String },
@@ -143,6 +137,140 @@ const EthersTxSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
 });
 
+// ============= UPDATED POST SCHEMA =============
+const postSchema = new mongoose.Schema({
+  title: { 
+    type: String, 
+    required: [true, 'Title is required'],
+    trim: true,
+    maxlength: [100, 'Title cannot exceed 100 characters']
+  },
+  content: { 
+    type: String, 
+    required: [true, 'Content is required'],
+    trim: true,
+    maxlength: [5000, 'Content cannot exceed 5000 characters']
+  },
+  description: { 
+    type: String, 
+    trim: true,
+    maxlength: [500, 'Description cannot exceed 500 characters']
+  },
+  images: [{ 
+    type: String  // URLs to uploaded images
+  }],
+  tags: [{ 
+    type: String,
+    trim: true
+  }],
+  category: { 
+    type: String, 
+    enum: ["art", "project", "thought", "event", "announcement", "other"],
+    default: "thought"
+  },
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: "User", 
+    required: true 
+  },
+  likes: [{ 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: "User" 
+  }],
+  comments: [{  // Array of comment references
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: "Comment" 
+  }],
+  commentsCount: { 
+    type: Number, 
+    default: 0 
+  },
+  isPublic: { 
+    type: Boolean, 
+    default: true 
+  },
+  views: { 
+    type: Number, 
+    default: 0 
+  },
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Add virtual for like count
+postSchema.virtual('likeCount').get(function() {
+  return this.likes.length;
+});
+// ============= END UPDATED POST SCHEMA =============
+
+// ============= NEW COMMENT SCHEMA =============
+const commentSchema = new mongoose.Schema({
+  user: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: "User", 
+    required: true 
+  },
+  content: { 
+    type: String, 
+    required: [true, 'Comment content is required'],
+    trim: true,
+    maxlength: [1000, 'Comment cannot exceed 1000 characters']
+  },
+  post: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: "Post", 
+    required: true 
+  },
+  likes: [{ 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: "User" 
+  }]
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Add virtual for like count on comment
+commentSchema.virtual('likeCount').get(function() {
+  return this.likes.length;
+});
+
+// Admin schema
+import bcrypt from "bcrypt";
+const adminSchema = new mongoose.Schema({
+  pseudo: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  password: {
+    type: String,
+    required: true
+  },
+  role: {
+    type: String,
+    default: "admin"
+  }
+});
+
+
+// Middleware pour hasher le mot de passe avant save
+adminSchema.pre("save", async function(next) {
+  if (!this.isModified("password")) return next();
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// Méthode pour comparer le mot de passe
+adminSchema.methods.comparePassword = async function(candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
+
+
 /**
  * Avoid model overwrite in dev / hot-reload environments
  */
@@ -153,6 +281,8 @@ const Friend = mongoose.models.Friend || mongoose.model("Friend", friendSchema);
 const Wallet = mongoose.models.Wallet || mongoose.model("Wallet", walletSchema);
 const Transaction = mongoose.models.Transaction || mongoose.model("Transaction", transactionSchema);
 const EthersTx = mongoose.models.EthersTx || mongoose.model('EthersTx', EthersTxSchema);
+const Comment = mongoose.models.Comment || mongoose.model("Comment", commentSchema);
+const Admin = mongoose.models.Admin || mongoose.model("Admin", adminSchema);
 
 /**
  * Ensure connection is established when this module is imported.
@@ -161,4 +291,4 @@ connectToDatabase().catch((err) => {
   console.error("Failed to connect to MongoDB", err);
 });
 
-export { User, Post, Message, Friend, Wallet, Transaction, connectToDatabase };
+export { User, Post, Message, Friend, Wallet, EthersTx, Transaction, Comment, Admin, connectToDatabase };
