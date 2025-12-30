@@ -1,10 +1,13 @@
-import CssBaseline from "@mui/material/CssBaseline";
+'use client';
 
-export default function tableLayout({ children }) {
+import CssBaseline from "@mui/material/CssBaseline";
+import MuiThemeProvider from "../../theme";
+
+export default function TableLayout({ children }) {
   return (
-    <>
+    <MuiThemeProvider>
       <CssBaseline />
       {children}
-    </>
+    </MuiThemeProvider>
   );
 }

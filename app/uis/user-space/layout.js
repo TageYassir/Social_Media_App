@@ -1,8 +1,7 @@
 'use client'
 
-import { LocationOn as LocationOnIcon, MessageOutlined, PeopleOutline, CurrencyBitcoin, HomeOutlined, AccountCircle } from "@mui/icons-material";
+import { MessageOutlined, PeopleOutline, CurrencyBitcoinOutlined, HomeOutlined, AccountCircleOutlined, NotificationsOutlined as NotificationsIcon } from "@mui/icons-material";
 import { AppBar, Box, Button, IconButton, Stack, Toolbar, Typography, Paper, BottomNavigation, BottomNavigationAction, Badge, Menu, MenuItem } from "@mui/material";
-import NotificationsIcon from '@mui/icons-material/Notifications';
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
 
@@ -386,11 +385,10 @@ export default function RootLayout({ children }) {
           <Paper elevation={2}>
             <BottomNavigation showLabels value={value} onChange={(event, newValue) => setValue(newValue)}>
               <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space")} label="Home" icon={<HomeOutlined />} />
-              <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/maps")} label="Maps" icon={<LocationOnIcon />} />
               <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/all-users")} label="Community" icon={<PeopleOutline />} />
               <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/chat")} label="Chat" icon={<MessageOutlined />} />
-              <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/profile")} label="Profile" icon={<AccountCircle />} />
-              <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/crypto-ethers")} label="Crypto" icon={<CurrencyBitcoin />} />
+              <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/profile")} label="Profile" icon={<AccountCircleOutlined />} />
+              <BottomNavigationAction onClick={(e) => loadScreen(e, "/uis/user-space/crypto-ethers")} label="Crypto" icon={<CurrencyBitcoinOutlined />} />
             </BottomNavigation>
           </Paper>
         </Box>

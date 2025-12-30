@@ -28,7 +28,7 @@ import { useEffect, useState } from "react"
 /** Next Navigation */
 import { useRouter } from "next/navigation"
 /** Icons Imports */
-import { AddCircle, PhotoLibrary, Edit } from "@mui/icons-material"
+import { AddCircle, PhotoLibrary, Edit, Map } from "@mui/icons-material"
 /** Components */
 import PostCard from "@/components/Creation/PostCard"
 
@@ -404,13 +404,22 @@ export default function ProfilePage() {
         <Typography variant="h4" sx={{ fontWeight: 600 }}>
           Profile
         </Typography>
-        <IconButton
-          color="primary"
-          onClick={() => router.push('/uis/user-space/creation')}
-          aria-label="Create"
-        >
-          <AddCircle />
-        </IconButton>
+        <Box>
+          <IconButton
+            color="primary"
+            onClick={() => router.push('/uis/user-space/maps')}
+            aria-label="Map"
+          >
+            <Map />
+          </IconButton>
+          <IconButton
+            color="primary"
+            onClick={() => router.push('/uis/user-space/creation')}
+            aria-label="Create"
+          >
+            <AddCircle />
+          </IconButton>
+        </Box>
       </Box>
 
       {/* Profile Summary */}

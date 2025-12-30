@@ -19,19 +19,27 @@ async function safeJson(req) {
 async function findUserById(id) {
   if (!id) return null;
   await ensureDbConnected();
+  // Using .lean() for faster read-only performance
   return User.findById(id).lean();
 }
 
 /**
  * GET /api/users/:id
+ * Fetches a single user by their MongoDB ObjectId
  */
 export async function GET(request, { params }) {
-  const { id } = params || {};
-  if (!id) return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+  // NEXT.JS 15 FIX: params must be awaited
+  const { id } = await params; 
+
+  if (!id) {
+    return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+  }
 
   try {
     const user = await findUserById(id);
-    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
     return NextResponse.json(user);
   } catch (err) {
     console.error("GET /api/users/:id error:", err);
@@ -41,18 +49,23 @@ export async function GET(request, { params }) {
 
 /**
  * PUT /api/users/:id
- * Replace/modify user properties. Caller should send validated payload.
- * Note: do NOT allow _id changes from client.
+ * Replace/modify user properties.
  */
 export async function PUT(request, { params }) {
-  const { id } = params || {};
-  if (!id) return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+  // NEXT.JS 15 FIX: params must be awaited
+  const { id } = await params;
+
+  if (!id) {
+    return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+  }
 
   try {
     const data = await safeJson(request);
-    if (!data) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    if (!data) {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
 
-    // Prevent changing the Mongo _id
+    // Prevent changing the Mongo _id as per your instruction
     if (data._id) delete data._id;
 
     await ensureDbConnected();
@@ -62,7 +75,9 @@ export async function PUT(request, { params }) {
       { new: true, runValidators: true, context: "query" }
     ).lean();
 
-    if (!updated) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (!updated) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
     return NextResponse.json(updated);
   } catch (err) {
     console.error("PUT /api/users/:id error:", err);
@@ -74,13 +89,20 @@ export async function PUT(request, { params }) {
  * DELETE /api/users/:id
  */
 export async function DELETE(request, { params }) {
-  const { id } = params || {};
-  if (!id) return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+  // NEXT.JS 15 FIX: params must be awaited
+  const { id } = await params;
+
+  if (!id) {
+    return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+  }
 
   try {
     await ensureDbConnected();
     const removed = await User.findByIdAndDelete(id).lean();
-    if (!removed) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    
+    if (!removed) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
     return NextResponse.json({ success: true, user: removed });
   } catch (err) {
     console.error("DELETE /api/users/:id error:", err);

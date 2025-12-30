@@ -38,7 +38,9 @@ export async function GET(request, { params }) {
  * Updates only the location nested object.
  */
 export async function PATCH(request, { params }) {
-  const { id } = params || {};
+  // Replace direct access to params with a safe unwrap (supports Promise or plain object)
+  const resolvedParams = (params && typeof params.then === 'function') ? await params : params;
+  const { id } = resolvedParams || {};
   if (!id) return NextResponse.json({ error: "Missing user id" }, { status: 400 });
 
   try {

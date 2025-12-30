@@ -2,25 +2,50 @@
 
 import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Box, CircularProgress, List, ListItem, ListItemText, Typography, Avatar, ListItemAvatar, Divider, Paper, TextField, InputAdornment, IconButton } from '@mui/material'
-import SearchIcon from '@mui/icons-material/Search'
-import ClearIcon from '@mui/icons-material/Clear'
+import { 
+  Box, 
+  CircularProgress, 
+  List, 
+  Typography, 
+  Avatar, 
+  Paper, 
+  TextField, 
+  InputAdornment, 
+  IconButton,
+  Badge,
+  Container
+} from '@mui/material'
+import {
+  Search as SearchIcon,
+  Clear as ClearIcon,
+  ChatBubbleOutline as ChatIcon,
+  AccessTime as TimeIcon,
+  ChevronRight as ChevronRightIcon
+} from '@mui/icons-material'
 
 /**
- * ConversationsList
- *
- * - Loads current user id (server endpoint fallback -> localStorage)
- * - Loads messages for user and groups them by peer id keeping last message
- * - Resolves peer user records by id (GET /api/users/:id preferred, fallback to /api/users?operation=get-user&id=...)
- * - Shows peer pseudo (or firstName / email) in the list instead of raw ids
+ * Modernized ConversationsList
  */
+
+// Helper to format time smartly
+const formatTime = (dateStr) => {
+  if (!dateStr) return ""
+  const date = new Date(dateStr)
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+  
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
 
 export default function ConversationsList() {
   const router = useRouter()
   const [query, setQuery] = useState("")
   const [currentUserId, setCurrentUserId] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [conversations, setConversations] = useState([]) // { peerId, lastText, lastAt, lastSentAtRaw, peer }
+  const [conversations, setConversations] = useState([]) 
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -34,25 +59,21 @@ export default function ConversationsList() {
         }
       } catch (e) { /* ignore */ }
 
-      // fallback localStorage
       try {
         const raw = typeof window !== "undefined" ? localStorage.getItem("user") : null
         if (raw) {
           const parsed = JSON.parse(raw)
-          if (parsed?.id) { setCurrentUserId(parsed.id); return }
+          if (parsed?.id || parsed?._id) { setCurrentUserId(parsed.id || parsed._id); return }
         }
       } catch (e) { /* ignore */ }
-
-      setCurrentUserId(null)
     }
-
     loadCurrentUser()
   }, [])
 
   useEffect(() => {
     async function loadConversations() {
       if (!currentUserId) {
-        setLoading(false)
+        if (!loading) setLoading(false)
         return
       }
 
@@ -61,18 +82,11 @@ export default function ConversationsList() {
       try {
         const url = `/api/messages?operation=get-by-user&userId=${encodeURIComponent(currentUserId)}`
         const res = await fetch(url)
-        if (!res.ok) {
-          const payload = await res.json().catch(() => null)
-          setError(payload?.error || `Server returned ${res.status}`)
-          setConversations([])
-          setLoading(false)
-          return
-        }
+        if (!res.ok) throw new Error(`Error ${res.status}`)
 
         const payload = await res.json()
         const msgs = Array.isArray(payload?.messages) ? payload.messages : []
 
-        // Group by peer id and keep the latest message per conversation
         const map = new Map()
         msgs.forEach((m) => {
           const otherId = (String(m.senderId) === String(currentUserId)) ? String(m.receiverId) : String(m.senderId)
@@ -91,33 +105,18 @@ export default function ConversationsList() {
 
         const peers = Array.from(map.values()).sort((a, b) => b.lastAt - a.lastAt)
 
-        // Fetch user info for each peer in parallel.
-        // Prefer RESTful GET /api/users/:id, fallback to /api/users?operation=get-user&id=...
         const details = await Promise.all(peers.map(async (p) => {
           try {
-            // Try RESTful route first
-            try {
-              const r = await fetch(`/api/users/${encodeURIComponent(p.peerId)}`)
-              if (r.ok) {
-                const pl = await r.json().catch(() => null)
-                const user = pl?.user ?? pl ?? null
-                return { ...p, peer: user }
-              }
-            } catch (e) {
-              // ignore and try fallback
+            const r = await fetch(`/api/users/${encodeURIComponent(p.peerId)}`)
+            if (r.ok) {
+              const pl = await r.json()
+              return { ...p, peer: pl?.user ?? pl }
             }
-
-            // Fallback to query-based endpoint
-            try {
-              const r2 = await fetch(`/api/users?operation=get-user&id=${encodeURIComponent(p.peerId)}`)
-              if (r2.ok) {
-                const pl2 = await r2.json().catch(() => null)
-                return { ...p, peer: pl2?.user || pl2 || null }
-              }
-            } catch (e) {
-              // ignore
+            const r2 = await fetch(`/api/users?operation=get-user&id=${encodeURIComponent(p.peerId)}`)
+            if (r2.ok) {
+              const pl2 = await r2.json()
+              return { ...p, peer: pl2?.user || pl2 }
             }
-
             return { ...p, peer: null }
           } catch (e) {
             return { ...p, peer: null }
@@ -126,7 +125,7 @@ export default function ConversationsList() {
 
         setConversations(details)
       } catch (err) {
-        setError(err.message || "Failed to load conversations")
+        setError(err.message || "Failed to load")
       } finally {
         setLoading(false)
       }
@@ -137,115 +136,165 @@ export default function ConversationsList() {
 
   const openConversation = (peerId) => {
     if (!peerId) return
-    // Prefer route-based chat page
     router.push(`/uis/user-space/chat/${encodeURIComponent(peerId)}`)
   }
 
-  // client-side filtering by peer pseudo / firstName
   const filteredConversations = conversations.filter((c) => {
     if (!query.trim()) return true
-    const peer = c.peer
-    const name = peer ? (peer.pseudo || peer.firstName || '') : ''
+    const name = c.peer ? (c.peer.pseudo || c.peer.firstName || '') : ''
     return name.toLowerCase().includes(query.trim().toLowerCase())
   })
 
   return (
-    <Box sx={{ p: 2 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 700 }}>Conversations</Typography>
-      </Box>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f0f2f5', pb: 4 }}>
+      <Container maxWidth="sm" sx={{ py: { xs: 2, sm: 4 } }}>
+        
+        {/* Header */}
+        <Box sx={{ mb: 3, px: 1 }}>
+          <Typography variant="h4" sx={{ fontWeight: 800, color: '#1c1e21', letterSpacing: '-0.5px' }}>
+            Chats
+          </Typography>
+        </Box>
 
-      {/* Search bar */}
-      <Box sx={{ mb: 2 }}>
-        <TextField
-          fullWidth
-          placeholder="Search conversations by pseudo..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          variant="outlined"
-          size="small"
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            ),
-            endAdornment: (
-              <InputAdornment position="end">
-                {query ? (
+        {/* Search */}
+        <Box sx={{ mb: 3 }}>
+          <TextField
+            fullWidth
+            placeholder="Search people..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            variant="outlined"
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: '12px',
+                bgcolor: 'white',
+                '& fieldset': { border: 'none' },
+                boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+              }
+            }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon sx={{ color: 'text.secondary', ml: 1 }} />
+                </InputAdornment>
+              ),
+              endAdornment: query && (
+                <InputAdornment position="end">
                   <IconButton size="small" onClick={() => setQuery("")}><ClearIcon /></IconButton>
-                ) : null}
-              </InputAdornment>
-            )
-          }}
-        />
-      </Box>
-
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-          <CircularProgress size={28} />
+                </InputAdornment>
+              )
+            }}
+          />
         </Box>
-      ) : error ? (
-        <Box sx={{ p: 2 }}>
-          <Typography color="error">{error}</Typography>
-        </Box>
-      ) : conversations.length === 0 ? (
-        <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>No conversations yet</Typography>
-          <Typography variant="body2" color="text.secondary">Start a new chat from the All Users screen.</Typography>
-        </Paper>
-      ) : (
-        <List>
-          {filteredConversations.map((c) => {
-             const peer = c.peer
-             const displayName = peer ? (peer.pseudo || peer.firstName || c.peerId) : (c.peerId || "—")
-             const subtitle = c.lastText || ""
-             const timeText = c.lastSentAtRaw ? new Date(c.lastSentAtRaw).toLocaleString() : ""
-             const initial = (peer ? (peer.pseudo || peer.firstName || '') : '').charAt(0).toUpperCase() || '?'
 
-             return (
-               <Box key={c.peerId} sx={{ mb: 1 }}>
-                 <Paper
-                   onClick={() => openConversation(c.peerId)}
-                   elevation={0}
-                   sx={{
-                     display: 'flex',
-                     alignItems: 'center',
-                     gap: 2,
-                     p: 1.25,
-                     cursor: 'pointer',
-                     transition: 'background-color 150ms',
-                     '&:hover': { backgroundColor: 'action.hover' }
-                   }}
-                 >
-                   <ListItemAvatar>
-                     <Avatar sx={{ bgcolor: '#1976d2', width: 44, height: 44, fontWeight: 700 }}>{initial}</Avatar>
-                   </ListItemAvatar>
+        {/* List Content */}
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+            <CircularProgress size={30} thickness={5} />
+          </Box>
+        ) : error ? (
+          <Paper sx={{ p: 2, bgcolor: '#fff0f0', borderRadius: 3, textAlign: 'center' }}>
+            <Typography color="error">{error}</Typography>
+          </Paper>
+        ) : conversations.length === 0 ? (
+          <Paper elevation={0} sx={{ p: 6, textAlign: 'center', borderRadius: 4, bgcolor: 'transparent', border: '2px dashed #ccc' }}>
+            <ChatIcon sx={{ fontSize: 48, color: '#ccc', mb: 2 }} />
+            <Typography variant="h6" color="text.secondary">No messages yet</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Start a conversation from the directory.
+            </Typography>
+          </Paper>
+        ) : (
+          <List sx={{ p: 0 }}>
+            {filteredConversations.map((c) => {
+              const peer = c.peer
+              const displayName = peer ? (peer.pseudo || peer.firstName || "User") : "User"
+              const initial = displayName.charAt(0).toUpperCase()
+              const isMale = peer?.gender === 'Male'
+              const isOnline = peer?.isOnline ?? false
 
-                   <ListItemText
-                     primary={
-                       <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                         {displayName}
-                       </Typography>
-                     }
-                     secondary={
-                       <Typography variant="body2" color="text.secondary" noWrap>
-                         {subtitle}
-                       </Typography>
-                     }
-                     sx={{ mr: 2 }}
-                   />
+              return (
+                <Paper
+                  key={c.peerId}
+                  elevation={0}
+                  onClick={() => openConversation(c.peerId)}
+                  sx={{
+                    mb: 1.5,
+                    borderRadius: 4,
+                    overflow: 'hidden',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    borderLeft: '4px solid transparent',
+                    '&:hover': {
+                      bgcolor: '#fff',
+                      transform: 'translateX(4px)',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+                      borderLeft: '4px solid #1976d2'
+                    }
+                  }}
+                >
+                  <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Badge
+                      overlap="circular"
+                      anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                      variant="dot"
+                      sx={{ 
+                        '& .MuiBadge-badge': { 
+                          bgcolor: isOnline ? '#44b700' : '#bdbdbd', 
+                          border: '2px solid white',
+                          boxShadow: `0 0 0 1px ${isOnline ? '#44b700' : '#bdbdbd'}`
+                        } 
+                      }}
+                    >
+                      <Avatar 
+                        sx={{ 
+                          width: 54, 
+                          height: 54, 
+                          fontWeight: 700,
+                          fontSize: '1.2rem',
+                          background: isMale 
+                            ? 'linear-gradient(135deg, #1976d2 0%, #64b5f6 100%)' 
+                            : 'linear-gradient(135deg, #d32f2f 0%, #ff8a80 100%)',
+                          boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+                        }}
+                      >
+                        {initial}
+                      </Avatar>
+                    </Badge>
 
-                   <Box sx={{ ml: 'auto', textAlign: 'right' }}>
-                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{timeText}</Typography>
-                   </Box>
-                 </Paper>
-                 <Divider />
-               </Box>
-             )
-           })}
-         </List>
-       )}
-     </Box>
-   )
- }
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mb: 0.5 }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#1c1e21', noWrap: true }}>
+                          {displayName}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+                          {formatTime(c.lastSentAtRaw)}
+                        </Typography>
+                      </Box>
+                      
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Typography 
+                          variant="body2" 
+                          sx={{ 
+                            color: 'text.secondary', 
+                            overflow: 'hidden', 
+                            textOverflow: 'ellipsis', 
+                            whiteSpace: 'nowrap',
+                            maxWidth: '90%'
+                          }}
+                        >
+                          {c.lastText || "No message content"}
+                        </Typography>
+                        <ChevronRightIcon sx={{ color: '#ccc', fontSize: 18 }} />
+                      </Box>
+                    </Box>
+                  </Box>
+                </Paper>
+              )
+            })}
+          </List>
+        )}
+      </Container>
+    </Box>
+  )
+}
