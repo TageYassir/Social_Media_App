@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState, useRef, useCallback } from "react"
+import React, { useEffect, useState, useRef, useCallback, useLayoutEffect } from "react"
 import { useSearchParams, useParams } from "next/navigation"
 import { Box, Typography, Container, TextField, Button, List, ListItem, IconButton, Menu, MenuItem, ListItemIcon, ListItemText } from "@mui/material"
 import ImageIcon from "@mui/icons-material/Image"
@@ -59,6 +59,21 @@ export default function ChatClient({ receiver: receiverFromServer = null, receiv
   // ref for the scrollable messages container (we'll observe its visibility)
   const messagesContainerRef = useRef(null)
   const markedOnceRef = useRef(false) // ensure we only auto-mark once per mount
+
+  // Mask URL immediately (before paint) to avoid showing the raw id / query
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const maskedPath = '/uis/user-space/chat'
+      // also strip any search params
+      const current = window.location.pathname // + window.location.search
+      if (current !== maskedPath) {
+        window.history.replaceState(null, '', maskedPath)
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []) // run once on mount, before paint
 
   useEffect(() => {
     async function loadCurrentUser() {
@@ -128,6 +143,16 @@ export default function ChatClient({ receiver: receiverFromServer = null, receiv
           const msgs = Array.isArray(payload?.messages) ? payload.messages : []
           setMessages(msgs)
           setTimeout(() => scrollToBottom(), 50)
+
+          // ensure URL is masked after conversation load as well
+          try {
+            if (typeof window !== 'undefined') {
+              const maskedPath = '/uis/user-space/chat'
+              if (window.location.pathname !== maskedPath) {
+                window.history.replaceState(null, '', maskedPath)
+              }
+            }
+          } catch (e) { /* ignore */ }
         }
       } catch (err) {
         setError(err.message || "Failed to load conversation")
@@ -587,7 +612,7 @@ export default function ChatClient({ receiver: receiverFromServer = null, receiv
       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
         <Box
           sx={{
-            bgcolor: '#dcf8c6',
+            bgcolor: '#f0f2f5',
             borderRadius: '18px',
             px: 1.25,
             py: 0.75,
@@ -642,7 +667,7 @@ export default function ChatClient({ receiver: receiverFromServer = null, receiv
                 transform: 'translate(-50%, -50%)',
                 width: 14,
                 height: 14,
-                bgcolor: '#fff',
+                bgcolor: '#f0f2f5',
                 border: '2px solid rgba(0,0,0,0.4)',
                 borderRadius: '50%',
                 boxShadow: '0 1px 2px rgba(0,0,0,0.2)',

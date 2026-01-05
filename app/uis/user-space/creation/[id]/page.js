@@ -1,7 +1,7 @@
 // File: app/uis/user-space/creation/[id]/page.js
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import {
   Container,
   Typography,
@@ -58,6 +58,19 @@ export default function SinglePostPage() {
 
   const postId = params?.id;
 
+  // Mask URL immediately (before paint) to avoid showing raw post id
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const maskedPath = '/uis/user-space/creation';
+      if (window.location.pathname !== maskedPath) {
+        window.history.replaceState(null, '', maskedPath);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
   // Get current user
   useEffect(() => {
     const user = getCurrentUser();
@@ -77,35 +90,45 @@ export default function SinglePostPage() {
           const data = await response.json();
           setPost(data.post);
           
-          // Update like states
-          if (data.post) {
-            setLikeCount(data.post.likes?.length || 0);
-            
-            // Check if current user liked this post
-            if (currentUser && data.post.likes) {
-              const userLiked = data.post.likes.some(likeId => 
-                String(likeId) === String(currentUser._id || currentUser.id)
-              );
-              setLiked(userLiked);
+          // ensure URL is masked after post load as well
+          try {
+            if (typeof window !== 'undefined') {
+              const maskedPath = '/uis/user-space/creation';
+              if (window.location.pathname !== maskedPath) {
+                window.history.replaceState(null, '', maskedPath);
+              }
             }
-          }
-          
-          // Check if current user is the owner
-          if (currentUser && data.post && data.post.user) {
-            const userId = currentUser._id || currentUser.id;
-            const postUserId = data.post.user._id || data.post.user.id;
-            setIsOwner(String(userId) === String(postUserId));
-          }
-        } else {
-          const data = await response.json();
-          setError(data.error || 'Post not found');
-        }
-      } catch (error) {
-        console.error('Error fetching post:', error);
-        setError('Failed to load post');
-      } finally {
-        setLoading(false);
-      }
+          } catch (e) { /* ignore */ }
+           
+           // Update like states
+           if (data.post) {
+             setLikeCount(data.post.likes?.length || 0);
+             
+             // Check if current user liked this post
+             if (currentUser && data.post.likes) {
+               const userLiked = data.post.likes.some(likeId => 
+                 String(likeId) === String(currentUser._id || currentUser.id)
+               );
+               setLiked(userLiked);
+             }
+           }
+           
+           // Check if current user is the owner
+           if (currentUser && data.post && data.post.user) {
+             const userId = currentUser._id || currentUser.id;
+             const postUserId = data.post.user._id || data.post.user.id;
+             setIsOwner(String(userId) === String(postUserId));
+           }
+         } else {
+           const data = await response.json();
+           setError(data.error || 'Post not found');
+         }
+       } catch (error) {
+         console.error('Error fetching post:', error);
+         setError('Failed to load post');
+       } finally {
+         setLoading(false);
+       }
     };
     
     if (postId) {

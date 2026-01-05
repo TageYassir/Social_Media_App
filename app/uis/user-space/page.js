@@ -30,7 +30,7 @@ export default function Page() {
       justifyContent: "center",
       flexDirection: "column",
       p: 3,
-      background: "radial-gradient(circle, #fff 0%, #fdf5f2 100%)" // Soft warm background
+      background: "radial-gradient(circle, #f0f2f5 0%, #f0f2f5 100%)" // Soft warm background
     }}>
       
       {/* 1. Main Visual Section */}

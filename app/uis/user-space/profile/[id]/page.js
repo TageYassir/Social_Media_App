@@ -1,10 +1,9 @@
 // File: app/uis/user-space/profile/[id]/page.js
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useLayoutEffect } from 'react' // added useLayoutEffect
 import { useRouter, useParams } from 'next/navigation'
 import { Box, Avatar, Typography, Button, CircularProgress, Stack } from '@mui/material'
-import PostCard from '@/components/Creation/PostCard'
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -18,8 +17,6 @@ export default function ProfilePage() {
   const [relationship, setRelationship] = useState(null)
   const [processing, setProcessing] = useState(false)
   const [friendsCount, setFriendsCount] = useState(null)
-  const [posts, setPosts] = useState([])
-  const [loadingPosts, setLoadingPosts] = useState(false)
 
   async function resolveCurrentUserId() {
     try {
@@ -100,30 +97,18 @@ export default function ProfilePage() {
     return 0
   }
 
-  // Load user's posts
-  useEffect(() => {
-    const loadPosts = async () => {
-      if (!idFromRoute) return
-      setLoadingPosts(true)
-      try {
-        // Updated API call to use new endpoint
-        const response = await fetch(`/api/posts/user/${idFromRoute}`)
-        if (response.ok) {
-          const data = await response.json()
-          setPosts(data.posts || [])
-        }
-      } catch (error) {
-        console.error('Failed to load posts:', error)
-        setPosts([])
-      } finally {
-        setLoadingPosts(false)
+  // Mask immediately on mount (before paint) to avoid showing the raw id
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const maskedPath = '/uis/user-space/profile' // consistent masked path
+      if (window.location.pathname !== maskedPath) {
+        window.history.replaceState(null, '', maskedPath)
       }
+    } catch (e) {
+      // ignore
     }
-    
-    if (idFromRoute) {
-      loadPosts()
-    }
-  }, [idFromRoute])
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -146,6 +131,22 @@ export default function ProfilePage() {
         if (mounted) {
           const resolvedUser = payload?.user || payload || null
           setUser(resolvedUser)
+
+          // Replace URL with the same generic masked path (avoid any slug/id)
+          try {
+            if (typeof window !== 'undefined' && resolvedUser) {
+              const maskedPath = '/uis/user-space/profile'
+              try {
+                if (window.location.pathname !== maskedPath) {
+                  window.history.replaceState(null, '', maskedPath)
+                }
+              } catch (e) {
+                // ignore if replaceState fails
+              }
+            }
+          } catch (e) {
+            // ignore masking errors
+          }
 
           // Fetch friends count for this profile (resilient)
           try {
@@ -272,7 +273,7 @@ export default function ProfilePage() {
   if (!user) {
     return (
       <Box sx={{ p: 4 }}>
-        <Typography sx={{ mb: 2 }}>User not found for "{idFromRoute}"</Typography>
+        <Typography sx={{ mb: 2 }}>User not found</Typography>
         <Button variant="contained" size="small" onClick={() => router.push('/uis/all-users')}>Back to All Users</Button>
       </Box>
     )
@@ -322,30 +323,7 @@ export default function ProfilePage() {
         </Stack>
       </Box>
 
-      {/* Posts Section - RESTORED */}
-      <Box sx={{ mt: 4 }}>
-        <Typography variant="h6" gutterBottom>
-          Posts ({posts.length})
-        </Typography>
-        
-        {loadingPosts ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress />
-          </Box>
-        ) : posts.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 4, border: 1, borderColor: 'divider', borderRadius: 2 }}>
-            <Typography variant="body2" color="text.secondary">
-              No posts yet
-            </Typography>
-          </Box>
-        ) : (
-          <Box>
-            {posts.map((post) => (
-              <PostCard key={post._id} post={post} />
-            ))}
-          </Box>
-        )}
-      </Box>
+      {/* Posts section removed as requested */}
     </Box>
   )
 }

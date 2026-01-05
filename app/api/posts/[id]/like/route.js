@@ -60,7 +60,6 @@ export async function POST(request, { params }) {
     
     const updatedPost = await Post.findById(id)
       .populate('user', 'firstName lastName pseudo email')
-      .populate('likes', 'firstName lastName pseudo')
       .lean();
     
     return NextResponse.json({
