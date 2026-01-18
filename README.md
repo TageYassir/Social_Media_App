@@ -1,20 +1,21 @@
 # Social Media App (Next.js)
 
-A modern, minimal social media frontend built with Next.js (App Router). This repository contains the UI for a social media application — feeds, posts, profiles, interactions, and auth — implemented under `app/uis` (frontend components and pages).
+A modern, minimal social media frontend built with Next.js (App Router). This repository contains the UI and a small set of server-side route handlers implemented under `app/` using the Next.js App Router. The project uses Mongoose/MongoDB for persistence in the API route handlers.
 
-> NOTE: I attempted to inspect the actual frontend code under `app/uis` to extract exact component names, props, and examples so I could produce a README tailored to the real source. I couldn't access the repository files programmatically from here. Below is a comprehensive, ready-to-use README that you can drop into the repo. After you either grant access or paste the `app/uis` folder contents (or confirm component names), I will update this README to include exact component listings, usage examples, screenshots, and API details.
+This README has been updated to reflect the actual files and APIs discovered in the repository (not just a generic template).
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Tech Stack](#tech-stack)
-- [Features](#features)
-- [Project Structure](#project-structure)
-- [Installation](#installation)
+- [Quick Features](#quick-features)
+- [Project Structure (actual)](#project-structure-actual)
+- [API routes (what exists)](#api-routes-what-exists)
+- [Installation & Local development](#installation--local-development)
 - [Environment Variables](#environment-variables)
 - [Available Scripts](#available-scripts)
-- [Development Workflow](#development-workflow)
-- [UI Components (located in app/uis)](#ui-components-located-in-appuis)
+- [Notes on Frontend components & pages](#notes-on-frontend-components--pages)
+- [Detailed components reference (partial, generated from code search)](#detailed-components-reference-partial-generated-from-code-search)
 - [Testing and Linting](#testing-and-linting)
 - [Deploying](#deploying)
 - [Contributing](#contributing)
@@ -23,57 +24,116 @@ A modern, minimal social media frontend built with Next.js (App Router). This re
 
 ## Overview
 
-This project is the frontend for a social media application built on Next.js (App Router). It provides the user interface for:
-
-- User authentication (sign up, login)
-- Creating and viewing posts (text, images)
-- Real-time-like interactions (likes, comments)
-- User profiles and follow/unfollow
-- Feed with infinite scroll / pagination
-
-The UI is organized under `app/uis` (components, layouts, pages). Replace or extend components to match your backend API.
+The repository implements a Next.js App Router frontend for a social media application with built-in API route handlers under `app/api/*`. The UI lives under `app/uis` and uses client-side React components that call the local API routes. The server-side code uses Mongoose models defined in `app/api/models.js`.
 
 ## Tech Stack
 
 - Next.js (App Router)
-- React (functional components + hooks)
-- Tailwind CSS / CSS modules / Styled Components (adjust to your chosen styling)
-- TypeScript or JavaScript (repo-dependent — convert as needed)
-- Optional: SWR/React Query for data fetching
-- Optional: Vercel for deployment
+- React (client components + hooks)
+- Node.js (Next API route handlers)
+- MongoDB + Mongoose for DB models
+- MUI (Material UI) used in some UI pages; Tailwind or other styling may be used elsewhere
+- JavaScript (repository is in JS; TypeScript is optional)
 
-## Features
+## Quick Features
 
-- Responsive feed (mobile-first)
-- Post creation with attachments
-- Like, comment, and follow interactions
-- Profile pages with user info and posts
-- Client-side routing and progressive enhancement
-- Accessibility and performance minded components
+- User authentication flow hooks (login, current-user lookups) in the UI
+- Posts API: create, list (with pagination), single post get/update/delete
+- Comments and likes handlers
+- Per-user post listing endpoint
+- Simple crypto/wallet endpoints for wallet + transactions (basic operations)
+- Admin UI pages to inspect users/posts
 
-## Project Structure
+## Project Structure (actual)
 
-This is a suggested structure. Update after I can read `app/uis` to list exact files.
+Top-level important paths and files discovered:
 
 - app/
-  - layout.tsx / layout.js — app root layout
-  - page.tsx / page.js — home / feed
+  - api/
+    - models.js — Mongoose schemas and connectToDatabase() (exports User, Post, Comment, Friend, Wallet, Transaction, EthersTx, Admin, etc.)
+    - posts/
+      - route.js — GET all posts, POST create post
+      - [id]/route.js — GET single post, PUT update, DELETE
+      - [id]/comments/route.js — GET comments, POST new comment
+      - [id]/like/route.js — POST like/unlike
+      - user/[userId]/route.js — GET posts by user
+    - crypto/route.js — wallet and transaction operations (get-wallets, get-transactions, create-wallet, add-balance, adjust-balance)
+    - (UI expects) users/auth endpoints like:
+      - /api/users?operation=login
+      - /api/users?operation=get-current
+      - /api/auth/me (some UI code tries this)
   - uis/
-    - components/ — reusable UI components (Button, Avatar, Modal)
-    - feed/ — Feed, FeedItem / PostCard
-    - post/ — PostEditor, PostView
-    - profile/ — ProfileHeader, ProfilePosts
-    - auth/ — LoginForm, SignupForm
-    - common/ — utilities, icons, helpers
-- public/ — images and static assets
-- styles/ — global styles or Tailwind config
+    - page.js — Login / welcome page (client)
+    - user-space/
+      - profile/page.js — Profile page (client)
+      - creation/page.js — Creation list page (client)
+      - creation/new/page.js — New post form (client)
+      - chat/ — chat components and pages
+      - crypto-ethers/ — wallet/ethers components
+    - crypto/
+      - layout.js — Crypto layout used by wallet UI
+  - admin/
+    - [id]/page.js — Admin user inspector page
+
+- README.md (this file)
+- public/ — static assets (if present)
+- styles/ — global styles (if present)
 - package.json
-- next.config.js
-- README.md
+- next.config.js (if present)
 
-When you share/allow access to the `app/uis` folder I will replace the above with an exact file tree and component list.
+If you want a complete file tree, I can generate it from the repository.
 
-## Installation
+## API routes (what exists and shapes inferred from code)
+
+Below are the available API routes and the expected request/response shapes inferred from the source:
+
+- GET /api/posts
+  - Query params: page, limit, userId, category
+  - Response: { success: true, posts: [...], pagination: { page, limit, total, pages } }
+
+- POST /api/posts
+  - Body: { title, content, description?, images?, tags?, category?, userId }
+  - Validation: title, content, userId required
+  - Response 201: { success: true, post, message }
+
+- GET /api/posts/:id
+  - Response: { success: true, post }
+
+- PUT /api/posts/:id
+  - Body: { title?, content?, description?, images?, tags?, category?, isPublic?, userId }
+  - Authorization: checks that String(post.user) === String(userId)
+  - Response: { success: true, post, message }
+
+- DELETE /api/posts/:id
+  - Body: { userId }
+  - Authorization: checks that String(post.user) === String(userId)
+  - Response: { success: true, message }
+
+- GET /api/posts/user/:userId
+  - Query params: page, limit, includePrivate (true|false)
+  - Response: { success: true, posts: [...], user: { _id, firstName, lastName, pseudo, email }, pagination }
+
+- GET /api/posts/:id/comments
+  - Query params: page, limit
+  - Response: { success: true, comments: [...], pagination }
+
+- POST /api/posts/:id/comments
+  - Body: { content, userId }
+  - Response 201: { success: true, comment, message }
+
+- POST /api/posts/:id/like
+  - Body: { userId }
+  - Toggles like/unlike
+  - Response: { success: true, post, liked: boolean, likeCount }
+
+- GET /api/crypto?operation=get-wallets|get-wallet|get-transactions
+- POST /api/crypto (operations via query param or body.operation)
+  - Supported ops: create-wallet, add-balance, adjust-balance
+  - Responses: { success: true, wallet } or { success: true, transactions }
+
+- Additional endpoints expected by UI (not enumerated in this README): /api/users and /api/auth (UI calls `/api/users?operation=get-current`, `/api/users?operation=login`, `/api/auth/me`). Please check `app/api/users` or auth route files if present.
+
+## Installation & Local development
 
 1. Clone the repo:
    git clone https://github.com/TageYassir/Social_Media_App.git
@@ -85,120 +145,167 @@ When you share/allow access to the `app/uis` folder I will replace the above wit
    yarn
    # or
    pnpm install
+4. Configure environment variables (see below).
+5. Run development server:
+   npm run dev
+   # Opens on http://localhost:3000
+
+This project uses MongoDB via Mongoose — for local dev you can run a local MongoDB server or use a cloud instance and set MONGODB_URI accordingly.
 
 ## Environment Variables
 
-Create a `.env.local` in the project root with values required by the app. Typical variables:
+Create a `.env.local` in the project root and set at least:
 
-- NEXT_PUBLIC_API_URL=https://api.example.com
-- NEXT_PUBLIC_WEBSOCKET_URL=wss://ws.example.com
-- NEXTAUTH_URL=http://localhost:3000
-- NEXTAUTH_SECRET=your-secret (if using NextAuth)
+- MONGODB_URI=mongodb://localhost:27017/social_media_app
+- NEXT_PUBLIC_API_URL=http://localhost:3000
+- NEXT_PUBLIC_WEBSOCKET_URL= (optional)
+- NEXTAUTH_SECRET= (optional; only if using NextAuth or similar)
 
-Adjust according to the authentication/data fetching strategy used in the repo.
+The API route handlers call `connectToDatabase()` from `app/api/models.js` — ensure `MONGODB_URI` or equivalent is used in that module.
 
 ## Available Scripts
 
-- npm run dev — start development server (localhost:3000)
+- npm run dev — start development server
 - npm run build — build production app
 - npm run start — start production server
-- npm run lint — run linter
+- npm run lint — run linter (if configured)
 - npm run test — run tests (if configured)
 
-## Development Workflow
+## Notes on Frontend components & pages
 
-- Branching: create feature branches from main (feature/{short-description})
-- Formatting: use Prettier & ESLint
-- Commits: use conventional commits if you want automated changelogs
-- PRs: include a description, screenshots, and testing steps
+I inspected several client pages and components; below are the important ones I found and where they call the API:
 
-## UI Components (located in app/uis)
+- app/uis/page.js — Login / welcome page. Uses MUI imports (Box, Button, TextField, etc.). Calls POST `/api/users?operation=login` and stores user in localStorage.
+- app/uis/user-space/profile/page.js — Profile page. Fetches current user (`/api/users?operation=get-current`) and retrieves posts; contains robust helpers for fetching friend counts across multiple endpoints.
+- app/uis/user-space/creation/page.js — Fetches and lists the current user's posts via `/api/posts/user/${userId}`.
+- app/uis/user-space/creation/new/page.js — New post form that POSTs to `/api/posts` with `userId`.
+- app/uis/crypto/layout.js — Layout and helpers for crypto/wallet UI; calls `/api/crypto` operations like `get-wallets`, `get-transactions`, `create-wallet`.
+- app/admin/[id]/page.js — Admin page that fetches `/api/users/${id}` and `/api/posts?userId=${id}`.
 
-I couldn't read `app/uis` programmatically from here. Below is a recommended way to document components; once I can read the directory I will populate this section with exact component names, props, and usage examples.
+Below are documented components found in the repository (each entry includes purpose, inferred props and example usage). These entries were generated by inspecting each file's default export and top-level functions.
 
-Recommended content for each component entry:
-- File path: `app/uis/<path>/<Component>.tsx`
-- Purpose: short description (one-liner)
-- Props: list of props + types and defaults
-- Example usage: small code snippet
-- Notes: accessibility, edge-cases, related components
+1) app/uis/page.js
+- Component: UisLoginPage (default export)
+- Purpose: Login / welcome page — presents a login form and handles login flow (POST /api/users?operation=login), marks user online, stores user in localStorage and redirects to /uis/user-space.
+- Props: none (page component)
+- Example usage: This is the page rendered at /uis (no manual invocation required).
+- Notes: Uses MUI components and includes password visibility toggle and robust markUserOnline helper.
 
-Example placeholder entry:
+2) app/uis/style.js
+- Export: rawTheme (Material-UI theme factory, default export)
+- Purpose: Central MUI theme configuration (palette, typography, shadows, shapes).
+- Props: N/A — export used by ThemeProvider.
+- Example usage:
+  import { ThemeProvider } from '@mui/material'
+  import rawTheme from './app/uis/style'
+  <ThemeProvider theme={rawTheme}>{children}</ThemeProvider>
 
-Component: PostCard
-- Path: app/uis/feed/PostCard.tsx
-- Purpose: Renders a single post with author, timestamp, content, image, likes, comments
+3) app/uis/crypto/layout.js
+- Component: RootLayout (default export)
+- Purpose: Layout for crypto section; manages nav, invitations, and resolves current user id.
 - Props:
-  - post: Post (object) — required
-  - onLike(postId) — callback
-  - onComment(postId, text) — callback
-- Example:
-  <PostCard post={post} onLike={() => {}} onComment={() => {}} />
+  - children: ReactNode
+- Example usage:
+  <RootLayout>
+    <YourCryptoPage />
+  </RootLayout>
 
-Please paste the `app/uis` file list or give me permission to read the repository and I'll auto-generate this section with exact signatures, small code examples, and screenshots.
+4) app/uis/user-space/crypto-ethers/SendEther.js
+- Component: SendEther (default export)
+- Purpose: UI to send ETH using an ethers.js signer. Validates recipient and amount, estimates gas, and sends transaction.
+- Props:
+  - signer: ethers.Signer (required) — object used to sign/send the transaction
+  - address: string (optional) — sender address
+- Example usage:
+  <SendEther signer={mySigner} address={myAddress} />
+
+- Notes: Accepts ethers v5 or v6 (tries parseEther/formatEther/format). Shows gas estimate and validates address using ethers utility.
+
+5) app/uis/user-space/crypto-ethers/ConnectWallet.js
+- Component: ConnectWallet (default export)
+- Purpose: Connects to injected Ethereum provider (MetaMask), obtains address and balance, optionally calls onConnected callback.
+- Props:
+  - onConnected: function(address, provider, signer) — called after successful connect
+  - allowDisconnect: boolean (default true) — if true allow disconnect actions in UI
+- Example usage:
+  <ConnectWallet onConnected={(addr, provider, signer) => setSigner(signer)} />
+
+6) app/uis/user-space/chat/[id]/ChatClient.js
+- Component: ChatClient (default export)
+- Purpose: Message/chat UI for a given receiver; handles messages list, recording audio, file uploads, marking seen, and masking URL for privacy.
+- Props:
+  - receiver: object | null (may be the populated user object)
+  - receiverId: string | null (receiver id)
+- Example usage:
+  <ChatClient receiver={userObj} />
+  or
+  <ChatClient receiverId="605..." />
+
+- Notes: Resolves receiverId from props, route params, or query. Uses many internal states (messages, recording, upload).
+
+7) app/uis/user-space/chat/ConversationsList.js.js
+- Component: ConversationsList (default export)
+- Purpose: Lists user conversations with search and unread counts. Fetches messages via /api/messages?operation=get-by-user&userId=...
+- Props: none
+- Example usage:
+  <ConversationsList />
+
+- Note: File name appears to be "ConversationsList.js.js" in the repo; consider renaming to ConversationsList.js to avoid tooling confusion.
+
+8) app/uis/user-space/ensureAuthClient.js
+- Component: EnsureAuthClient (default export)
+- Purpose: Client-only component that enforces authentication by redirecting to /uis if no user is present in localStorage.
+- Props: none
+- Example usage:
+  // Place near top-level of client pages that require auth
+  <EnsureAuthClient />
+
+9) app/uis/user-space/chat/page.js
+- Component: ChatIndexPage (default export)
+- Purpose: Page wrapper that renders ConversationsList (index of chats)
+- Props: none
+- Example usage: Page automatically rendered at chat index.
+
+10) app/uis/user-space/chat/MessageModal.js
+- Component: MessageModal (default export)
+- Purpose: Simple dialog/modal to display message details (senderId, receiverId, sentAt, text)
+- Props:
+  - open: boolean
+  - onClose: function
+  - message: object { senderId, receiverId, sentAt, text, ... }
+- Example usage:
+  <MessageModal open={open} onClose={() => setOpen(false)} message={msg} />
+
+Important notes about this generated list
+- The code search used to enumerate these components returned up to 10 results; results may be incomplete. If you want the full `app/uis` index I will run a complete repository enumeration and produce entries for every component.
+- Also, I noticed a probable filename issue: `ConversationsList.js.js` — consider renaming to `ConversationsList.js`.
+
+Would you like me to:
+- (1) Enumerate every file under `app/uis` and produce a complete components reference (full props, inferred types, example usage) and then open a PR updating README with that section, OR
+- (2) Produce a smaller, curated components index (only major pages and reusable components), OR
+- (3) Open a PR now with the partial components reference above inserted into README (target branch: main)?
+
+If you choose a PR, tell me the target branch (default `main`) and I will open it for you.
 
 ## Testing and Linting
 
-- Unit tests: Jest + React Testing Library (recommended)
-- E2E tests: Cypress / Playwright (optional)
-- Linting: ESLint + plugin:react/recommended + TypeScript rules (if using TS)
-- Formatting: Prettier
-
-Example commands:
-- npm run test
-- npm run lint
-- npm run format
+- The project does not appear to include an explicit test setup in the inspected files. Recommended:
+  - Unit tests: Jest + React Testing Library
+  - E2E: Playwright or Cypress
+  - Linting: ESLint + Prettier
 
 ## Deploying
 
-Deploy on Vercel for best Next.js support:
-1. Connect your GitHub repository to Vercel.
-2. Set environment variables in Vercel dashboard.
-3. Vercel will handle builds for Next.js automatically.
-
-Alternatively, build and serve:
-- npm run build
-- npm start
+- Vercel is recommended for Next.js App Router apps.
+- Set `MONGODB_URI` and any other secrets in the deployment environment.
+- If using server-side features (API routes), ensure your DB is accessible from the deployment environment.
 
 ## Contributing
 
-1. Fork the repository
-2. Create a new branch for your feature/fix
-3. Run tests and linting locally
-4. Open a Pull Request with a clear title and description
-
-How to help improve the README:
-- Provide screenshots and example GIFs (place them in `/public/screenshots`)
-- Give concrete API examples for how the frontend expects the backend (endpoints, payloads, auth flow)
-- Add a CONTRIBUTING.md if you'll accept community work
+- Create feature branches from `main`.
+- Follow code style (Prettier/ESLint), include tests for new behavior.
 
 ## Troubleshooting
 
-- If you see hydration errors, verify server/client markup parity and avoid non-deterministic rendering on server.
-- If assets fail to load, confirm `public/` contents and next.config.js asset settings.
-- For CORS issues, ensure the backend allows requests from your frontend host.
-
-## What I need from you to make this README "perfect"
-
-To make this README exact and tailored to your codebase I need one of the following:
-- Grant repository read access for me to inspect `app/uis` (or allow the code search tool to access the repo), OR
-- Paste the file tree/contents of `app/uis` here, OR
-- Tell me the list of components and their responsibilities (a simple list is enough)
-
-Once you provide that, I'll:
-- List every component with file path, purpose, props, and usage
-- Add screenshots and live examples from `app/uis`
-- Add a minimal API contract (endpoints + request/response shape) inferred from how components fetch data
-- Optionally create a PR with the updated README (if you ask me to open a pull request)
-
-## License & Contact
-
-Specify your license (MIT recommended if open source) and add contact info.
-
----
-
-If you want, I can now:
-- (A) Draft a fully populated README from assumptions (I already did the template above), or
-- (B) Inspect `app/uis` and produce a tailored README — please either provide the folder contents or grant read access so I can fetch the files and update the README accordingly.
-
-Tell me which option you prefer and provide the `app/uis` code or repository access and I’ll proceed to generate a final, exact README and (optionally) a PR to update the repository.
+- "Failed to connect to MongoDB" — verify `MONGODB_URI` and that the DB is running.
+- Hydration or SSR/client mismatches — check client-only hooks and avoid non-deterministic server rendering.
